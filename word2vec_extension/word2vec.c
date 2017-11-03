@@ -452,26 +452,26 @@ pq_search(PG_FUNCTION_ARGS)
     funcctx -> attinmeta = attinmeta;
 
     MemoryContextSwitchTo (oldcontext);
-}
+  }
 
-funcctx = SRF_PERCALL_SETUP ();
-usrfctx = (UsrFctx*) funcctx -> user_fctx;
+  funcctx = SRF_PERCALL_SETUP ();
+  usrfctx = (UsrFctx*) funcctx -> user_fctx;
 
-// return results
-if (usrfctx->iter >= usrfctx->k){
-    SRF_RETURN_DONE (funcctx);
-}else{
+  // return results
+  if (usrfctx->iter >= usrfctx->k){
+      SRF_RETURN_DONE (funcctx);
+  }else{
 
-  Datum result;
-  HeapTuple outTuple;
-  snprintf(usrfctx->values[0], 16, "%d", usrfctx->tk[usrfctx->iter].id);
-  snprintf(usrfctx->values[1], 16, "%f", usrfctx->tk[usrfctx->iter].distance);
-  usrfctx->iter++;
-  outTuple = BuildTupleFromCStrings (funcctx -> attinmeta,
-				      usrfctx -> values);
-  result = TupleGetDatum (funcctx -> slot, outTuple);
-  SRF_RETURN_NEXT(funcctx, result);
+    Datum result;
+    HeapTuple outTuple;
+    snprintf(usrfctx->values[0], 16, "%d", usrfctx->tk[usrfctx->iter].id);
+    snprintf(usrfctx->values[1], 16, "%f", usrfctx->tk[usrfctx->iter].distance);
+    usrfctx->iter++;
+    outTuple = BuildTupleFromCStrings (funcctx -> attinmeta,
+  				      usrfctx -> values);
+    result = TupleGetDatum (funcctx -> slot, outTuple);
+    SRF_RETURN_NEXT(funcctx, result);
 
-}
+  }
 
 }
