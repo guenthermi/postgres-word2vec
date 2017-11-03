@@ -1,0 +1,4 @@
+# word2vec extension
+comment = 'word2vec functions'
+default_version = '0.0.1'
+relocatable = true

@@ -1,1 +1,4 @@
 vectors/
+*.o
+*.so
+
