@@ -8,6 +8,8 @@ import faiss
 import time
 import psycopg2
 
+import index_utils as utils
+
 STD_USER = 'postgres'
 STD_PASSWORD = 'postgres'
 STD_HOST = 'localhost'
@@ -17,33 +19,10 @@ BATCH_SIZE = 50000
 
 PQ_TABLE_NAME = 'pq_quantization'
 CODEBOOK_TABLE_NAME = 'pq_codebook'
-VEC_FILE_PATH = '../vectors/google_vecs.txt'
+TABLE_INFORMATION = ((PQ_TABLE_NAME,"(id serial PRIMARY KEY, word varchar(100), vector int[])"),
+    (CODEBOOK_TABLE_NAME, "(id serial PRIMARY KEY, pos int, code int, vector float4[])"))
 
-def get_vectors(filename, max_count=10**9):
-    f = open(filename)
-    line_splits = f.readline().split()
-    size = int(line_splits[0])
-    d = int(line_splits[1])
-    words, vectors, count = [],np.zeros((size, d)).astype('float32'), 0
-    print(count)
-    print(line_splits)
-    while (line_splits) and (count < max_count):
-        line_splits = f.readline().split()
-        if not line_splits:
-            break
-        word = line_splits[0]
-        vector = [float(elem) for elem in line_splits[1:]]
-        v_len = np.linalg.norm(vector)
-        vector = [x / v_len for x in vector]
-        if len(vector) == 300:
-            vectors[count] = vector
-            words.append(word)
-            # vectors.append(vector)
-            # words.append(word)
-            count += 1
-        if count % 10000 == 0:
-            print('INFO read', count, 'vectors')
-    return words, vectors, count
+VEC_FILE_PATH = '../vectors/google_vecs.txt'
 
 def create_quantizer(vectors, m, centr_num, iterts=10):
     if len(vectors[0]) % m != 0:
@@ -51,13 +30,13 @@ def create_quantizer(vectors, m, centr_num, iterts=10):
         return
     result = centroids = []
     len_centr = int(len(vectors[0]) / m)
-    # 2) partition vectors (each vector)
+    # partition vectors (each vector)
     partitions = []
     for vec in vectors:
         partitions.append([vec[i:i + len_centr] for i in range(0, len(vec), len_centr)])
     for i in range(m):
         subvecs = [partitions[j][i] for j in range(len(partitions))]
-        # 3) apply k-means -> get maps id \to centroid for each partition (use scipy k-means)
+        # apply k-means -> get maps id \to centroid for each partition (use scipy k-means)
         print(subvecs[0])
         centr_map, distortion = kmeans(subvecs, centr_num, iterts) # distortion is unused at the moment
         centroids.append(np.array(centr_map).astype('float32')) #  centr_map could be transformed into a real map (maybe not reasonable)
@@ -94,7 +73,6 @@ def create_index_with_faiss(vectors, codebook):
             batches = [[] for i in range(m)]
         if count % 1000 == 0:
             print('appended', len(result), 'vectors')
-        # result.append(code)
     print('appended', len(result), 'vectors')
     return result
 
@@ -127,37 +105,13 @@ def create_index(vectors, codebook):
             print('append', count, 'vectors')
     return result
 
-def init_tables(con, cur):
-    query_check_existence = "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name=%s;"
-    for (name, schema) in ((PQ_TABLE_NAME,"(id serial PRIMARY KEY, word varchar(100), vector int[])") ,(CODEBOOK_TABLE_NAME, "(id serial PRIMARY KEY, pos int, code int, vector float4[])")):
-        cur.execute(cur.mogrify(query_check_existence, (name,)))
-        rows = cur.fetchall()
-        table_exists = (len(rows) > 0)
-        if not table_exists:
-            query_create_table = "CREATE TABLE " + name + " " + schema + ";"
-            result = cur.execute(query_create_table)
-            # commit changes
-            con.commit()
-            print('Created new table', name)
-        else:
-            # delete content of table
-            query_clear = "DELETE FROM " + name + ";"
-            result = cur.execute(query_clear)
-            con.commit()
-            print('Table', name, 'already exists. All entries are removed.')
-    return
-
 def add_to_database(words, codebook, pq_quantization, con, cur):
     print('len words', len(words), 'len pq_quantization', len(pq_quantization))
     # add codebook
     for pos in range(len(codebook)):
         values = []
         for i in range(len(codebook[pos])):
-            vec = codebook[pos][i]
-            output_vec = '{'
-            for elem in vec:
-                output_vec += str(elem) + ','
-            output_vec = output_vec[:-1] + '}'
+            output_vec = utils.serialize_vector(codebook[pos][i])
             values.append({"pos": pos, "code": i, "vector": output_vec})
         cur.executemany("INSERT INTO "+ CODEBOOK_TABLE_NAME + " (pos,code,vector) VALUES (%(pos)s, %(code)s, %(vector)s)", tuple(values))
         con.commit()
@@ -165,10 +119,7 @@ def add_to_database(words, codebook, pq_quantization, con, cur):
     # add pq qunatization
     values = []
     for i in range(len(pq_quantization)):
-        output_vec = '{'
-        for elem in pq_quantization[i]:
-            output_vec += str(elem) + ','
-        output_vec = output_vec[:-1] + '}'
+        output_vec = utils.serialize_vector(pq_quantization[i])
         values.append({"word": words[i], "vector": output_vec})
         if (i % (BATCH_SIZE-1) == 0) or (i == (len(pq_quantization)-1)):
             cur.executemany("INSERT INTO "+ PQ_TABLE_NAME + " (word,vector) VALUES (%(word)s, %(vector)s)", tuple(values))
@@ -180,11 +131,9 @@ def add_to_database(words, codebook, pq_quantization, con, cur):
 def main(argc, argv):
     train_size = 10000
     # 1) get vectors
-    words, vectors, vectors_size = get_vectors(VEC_FILE_PATH)
+    words, vectors, vectors_size = utils.get_vectors(VEC_FILE_PATH)
     print(vectors_size)
-    # 2) select samples for training
-    # 3) partition sample vectors (each vector)
-    # 4) apply k-means -> get maps id \to centroid for each partition (use scipy k-means)
+    # apply k-means -> get codebook
     codebook = create_quantizer(vectors[:train_size], 12, 256)
     # 5) create index with qunatizer
     start = time.time()
@@ -198,10 +147,8 @@ def main(argc, argv):
         print('Can not connect to database')
         return
     cur = con.cursor()
-    init_tables(con, cur)
+    utils.init_tables(con, cur, TABLE_INFORMATION)
     add_to_database(words, codebook, index, con, cur)
 
-    # 4) write vectors to database
-    # *) implement funciton to calculate distances
 if __name__ == "__main__":
 	main(len(sys.argv), sys.argv)
