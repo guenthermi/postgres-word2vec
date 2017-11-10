@@ -37,6 +37,9 @@ CREATE OR REPLACE FUNCTION ivfadc_search(anyarray, integer) RETURNS SETOF record
 AS '$libdir/word2vec', 'ivfadc_search'
 LANGUAGE C IMMUTABLE STRICT;
 
+CREATE OR REPLACE FUNCTION top_k_in_pq(anyarray, integer, integer[]) RETURNS SETOF record
+AS '$libdir/word2vec', 'top_k_in_pq'
+LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION k_nearest_neighbour(term varchar(100), k integer) RETURNS TABLE (word varchar(100), similarity float8) AS $$
 DECLARE
