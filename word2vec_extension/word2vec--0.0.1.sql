@@ -41,6 +41,10 @@ CREATE OR REPLACE FUNCTION top_k_in_pq(anyarray, integer, integer[]) RETURNS SET
 AS '$libdir/word2vec', 'top_k_in_pq'
 LANGUAGE C IMMUTABLE STRICT;
 
+CREATE OR REPLACE FUNCTION cluster_pq(integer[], integer) RETURNS SETOF record
+AS '$libdir/word2vec', 'cluster_pq'
+LANGUAGE C IMMUTABLE STRICT;
+
 CREATE OR REPLACE FUNCTION k_nearest_neighbour(term varchar(100), k integer) RETURNS TABLE (word varchar(100), similarity float8) AS $$
 DECLARE
 table_name varchar;

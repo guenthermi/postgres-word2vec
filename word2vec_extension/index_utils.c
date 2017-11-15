@@ -3,6 +3,8 @@
 #include "postgres.h"
 #include "fmgr.h"
 #include "funcapi.h"
+#include "stdlib.h"
+#include "time.h"
 #include "executor/spi.h"
 #include "utils/builtins.h"
 #include "utils/array.h"
@@ -31,6 +33,29 @@ float squareDistance(float* v1, float* v2, int n){
   }
 
   return result;
+}
+
+void shuffle(int* input, int* output, int inputSize, int outputSize){
+  int i;
+  int j;
+  int t;
+  int* tmp = malloc(sizeof(int)*inputSize);
+  srand(time(0));
+
+  for (i = 0; i < inputSize; i++){
+    tmp[i] = input[i];
+  }
+  for (i = 0; i < outputSize; i++)
+  {
+    j = i + rand() / (RAND_MAX / (inputSize - i) + 1);
+    t = tmp[j];
+    tmp[j] = tmp[i];
+    tmp[i] = t;
+  }
+  for (i = 0; i < outputSize; i++){
+    output[i] = tmp[i];
+  }
+  free(tmp);
 }
 
 CoarseQuantizer getCoarseQuantizer(int* size){
@@ -149,4 +174,79 @@ void freeCodebook(Codebook cb, int size){
     free(cb[i].vector);
   }
   free(cb);
+}
+
+WordVectors getVectors(char* tableName, int* ids, int idsSize){
+  char* command;
+  char* cur;
+  int ret;
+  int proc;
+  bool info;
+
+  Oid eltype;
+  int16 typlen;
+  bool typbyval;
+  char typalign;
+  bool *nulls;
+  int n = 0;
+
+  WordVectors result;
+
+  result.vectors = malloc(sizeof(float*)*idsSize);
+  result.ids = malloc(sizeof(int)*idsSize);
+
+  SPI_connect();
+
+  command = palloc((100 + idsSize*18)*sizeof(char));
+  sprintf(command, "SELECT id, vector FROM %s WHERE id IN (", tableName);
+  // fill command
+  cur = command + strlen(command);
+  for (int i = 0; i < idsSize; i++){
+    if ( i == idsSize - 1){
+        cur += sprintf(cur, "%d", ids[i]);
+    }else{
+      cur += sprintf(cur, "%d, ", ids[i]);
+    }
+  }
+  cur += sprintf(cur, ")");
+
+  ret = SPI_exec(command, 0);
+  proc = SPI_processed;
+  if (ret > 0 && SPI_tuptable != NULL){
+    TupleDesc tupdesc = SPI_tuptable->tupdesc;
+    SPITupleTable *tuptable = SPI_tuptable;
+    int i;
+    for (i = 0; i < proc; i++){
+      Datum id;
+      Datum vector;
+      Datum* data;
+      ArrayType* vectorAt;
+      int wordId;
+
+      HeapTuple tuple = tuptable->vals[i];
+      id = SPI_getbinval(tuple, tupdesc, 1, &info);
+      vector = SPI_getbinval(tuple, tupdesc, 2, &info);
+      wordId = DatumGetInt32(id);
+      vectorAt = DatumGetArrayTypeP(vector);
+      eltype = ARR_ELEMTYPE(vectorAt);
+      get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
+      deconstruct_array(vectorAt, eltype, typlen, typbyval, typalign, &data, &nulls, &n);
+      result.vectors[i] = malloc(sizeof(float)*n);
+      result.ids[i] = wordId;
+      for (int j = 0; j < n; j++){
+        result.vectors[i][j] = DatumGetFloat4(data[j]);
+      }
+    }
+  }
+  SPI_finish();
+
+  return result;
+}
+
+void freeWordVectors(WordVectors vectors, int size){
+  for (int i = 0; i < size; i++){
+    free(vectors.vectors[i]);
+  }
+  free(vectors.vectors);
+  free(vectors.ids);
 }

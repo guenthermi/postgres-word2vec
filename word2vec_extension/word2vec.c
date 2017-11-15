@@ -6,6 +6,7 @@
 #include "utils/array.h"
 #include "math.h"
 #include "stdio.h"
+#include "stdlib.h"
 
 #include "catalog/pg_type.h"
 
@@ -23,6 +24,16 @@ typedef struct UsrFctx {
   int iter;
   char **values;
 } UsrFctx;
+
+typedef struct UsrFctxCluster {
+  int* ids;
+  int size;
+  int* nearestCentroid;
+  float** centroids;
+  int iter;
+  int k; // number of clusters
+  char **values;
+} UsrFctxCluster;
 
 PG_FUNCTION_INFO_V1(cosine_similarity);
 
@@ -742,4 +753,298 @@ top_k_in_pq(PG_FUNCTION_ARGS)
 
   }
 
+}
+
+PG_FUNCTION_INFO_V1(cluster_pq);
+
+Datum
+cluster_pq(PG_FUNCTION_ARGS)
+{
+  // input: array of ids to cluster, number of clusters
+  // output: set of cluster vectors -> arrays of ids corresponding to cluster vectors
+
+  FuncCallContext *funcctx;
+  TupleDesc        outtertupdesc;
+  TupleTableSlot  *slot;
+  AttInMetadata   *attinmeta;
+  UsrFctxCluster *usrfctx;
+
+  const int DATASET_SIZE = 3000000; // TODO get this dynamically
+
+  if (SRF_IS_FIRSTCALL ()){
+
+    Oid eltype;
+    int16 typlen;
+    bool typbyval;
+    char typalign;
+    bool *nulls;
+    int n = 0;
+
+    MemoryContext  oldcontext;
+
+    Datum* idsData;
+    ArrayType* idArray;
+
+    int* inputIds;
+    int inputIdsSize;
+
+    int* kmCentroidIds;
+
+    int k;
+    int iterations;
+
+    float** querySimilarities;
+
+    Codebook cb;
+    int cbPositions = 0;
+    int cbCodes = 0;
+
+    // data structure for relation id -> nearest centroid
+    int* nearestCentroid;
+
+    // store number of nearest vectors per centroid
+    int* relationCounts;
+
+    // randomly choosen init vectors for centroids
+    WordVectors idVectors;
+
+    // centroids
+    float** kmCentroids;
+
+    // unnormalized new centroids
+    float** kmCentroidsNew;
+
+    funcctx = SRF_FIRSTCALL_INIT ();
+    oldcontext = MemoryContextSwitchTo (funcctx->multi_call_memory_ctx);
+
+    idArray = PG_GETARG_ARRAYTYPE_P(0);
+    k = PG_GETARG_INT32(1);
+
+    iterations = 10;
+
+    relationCounts = palloc(sizeof(int)*k);
+
+    nearestCentroid = palloc(sizeof(int)*(DATASET_SIZE+1));
+
+    // read ids from function args
+
+    eltype = ARR_ELEMTYPE(idArray);
+    get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
+    deconstruct_array(idArray, eltype, typlen, typbyval, typalign, &idsData, &nulls, &n);
+    inputIds = palloc(n*sizeof(int));
+    for (int j=0; j< n; j++){
+      inputIds[j] = DatumGetInt32(idsData[j]);
+    }
+    inputIdsSize = n;
+
+    if (inputIdsSize < k){
+      elog(ERROR, "|ids| < k");
+      SRF_RETURN_DONE (funcctx);
+    }
+
+    // get pq codebook
+    cb = getCodebook(&cbPositions, &cbCodes, "pq_codebook");
+
+    // choose initial km-centroid randomly
+    kmCentroidIds = palloc(sizeof(int)*k);
+    shuffle(inputIds, kmCentroidIds, inputIdsSize, k);
+
+    // get vectors for ids
+    idVectors = getVectors("google_vecs_norm", kmCentroidIds, k);
+    kmCentroids = idVectors.vectors;
+
+    kmCentroidsNew = palloc(sizeof(float*)*k);
+    for (int i = 0; i < k; i++){
+      kmCentroidsNew[i] = palloc(sizeof(float)*300);
+    }
+
+
+    for (int iteration = 0; iteration < iterations; iteration++){
+
+      int ret;
+      int proc;
+      bool info;
+      char* command;
+      char * cur;
+
+      // init kmCentroidsNew
+      for (int i=0; i<k;i++){
+        for (int j = 0; j < 300; j++){
+          kmCentroidsNew[i][j] = 0;
+        }
+      }
+
+      // determine similarities of codebook entries to km_centroid vector
+      querySimilarities = palloc(sizeof(float*) * k);
+
+      for (int cs = 0; cs < k; cs++){
+        querySimilarities[cs] = palloc(cbPositions*cbCodes*sizeof(float));
+        for (int i=0; i< cbPositions*cbCodes; i++){
+          int pos = cb[i].pos;
+          int code = cb[i].code;
+          float* vector = cb[i].vector;
+          querySimilarities[cs][pos*cbCodes + code] = squareDistance(kmCentroids[cs]+(pos*25), vector, 25);
+        }
+      }
+
+
+      // reset counts for relation
+      for (int i = 0; i < k; i++){
+        relationCounts[i] = 0;
+      }
+
+      // get vectors for ids
+      // get codes for all entries with an id in inputIds -> SQL Query
+      SPI_connect();
+      command = palloc(200* sizeof(char) + inputIdsSize*8*sizeof(char));
+      sprintf(command, "SELECT pq_quantization.id, pq_quantization.vector, google_vecs_norm.vector FROM pq_quantization INNER JOIN google_vecs_norm ON google_vecs_norm.id = pq_quantization.id WHERE pq_quantization.id IN (");
+      // fill command
+      cur = command + strlen(command);
+      for (int i = 0; i < inputIdsSize; i++){
+        if ( i == inputIdsSize - 1){
+            cur += sprintf(cur, "%d", inputIds[i]);
+        }else{
+          cur += sprintf(cur, "%d, ", inputIds[i]);
+        }
+      }
+      cur += sprintf(cur, ")");
+
+      ret = SPI_exec(command, 0);
+      proc = SPI_processed;
+      if (ret > 0 && SPI_tuptable != NULL){
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        SPITupleTable *tuptable = SPI_tuptable;
+        int i;
+        for (i = 0; i < proc; i++){
+          Datum id;
+          Datum pqVector;
+          Datum bigVector;
+
+          Datum* dataPqVector;
+          Datum* dataBigVector;
+
+          ArrayType* vectorAt;
+          int wordId;
+          float distance;
+          int pqSize;
+
+          // variables to determine best match
+          float minDist = 100; // sufficient high value
+
+          HeapTuple tuple = tuptable->vals[i];
+          id = SPI_getbinval(tuple, tupdesc, 1, &info);
+          pqVector = SPI_getbinval(tuple, tupdesc, 2, &info);
+          bigVector = SPI_getbinval(tuple, tupdesc, 3, &info);
+
+          wordId = DatumGetInt32(id);
+
+          vectorAt = DatumGetArrayTypeP(pqVector);
+          eltype = ARR_ELEMTYPE(vectorAt);
+          get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
+          deconstruct_array(vectorAt, eltype, typlen, typbyval, typalign, &dataPqVector, &nulls, &n);
+          pqSize = n;
+
+          vectorAt = DatumGetArrayTypeP(bigVector);
+          eltype = ARR_ELEMTYPE(vectorAt);
+          get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
+          deconstruct_array(vectorAt, eltype, typlen, typbyval, typalign, &dataBigVector, &nulls, &n);
+
+
+
+          for (int centroidIndex = 0; centroidIndex < k; centroidIndex++){
+            distance = 0;
+            for (int j = 0; j < pqSize; j++){
+              int code = DatumGetInt32(dataPqVector[j]);
+              distance += querySimilarities[centroidIndex][j*cbCodes + code];
+            }
+
+            if (distance < minDist){
+              minDist = distance;
+              nearestCentroid[wordId] = centroidIndex;
+            }
+          }
+          relationCounts[nearestCentroid[wordId]]++;
+          for (int j = 0; j < 300; j++){
+            kmCentroidsNew[nearestCentroid[wordId]][j] += DatumGetFloat4(dataBigVector[j]);
+          }
+        }
+        SPI_finish();
+      }
+      // calculate new km-centroids
+      for (int cs = 0; cs < k; cs++){
+        for (int pos = 0; pos < 300; pos++){
+          if (relationCounts[cs] > 0){
+            kmCentroids[cs][pos] = kmCentroidsNew[cs][pos] / relationCounts[cs];
+          }else{
+            kmCentroids[cs][pos] = 0;
+          }
+          kmCentroidsNew[cs][pos] = kmCentroids[cs][pos];
+        }
+      }
+    }
+
+    freeWordVectors(idVectors, k);
+
+    usrfctx = (UsrFctxCluster*) palloc (sizeof (UsrFctxCluster));
+    usrfctx -> ids = inputIds;
+    usrfctx -> size = inputIdsSize;
+    usrfctx -> nearestCentroid = nearestCentroid;
+    usrfctx -> centroids = kmCentroidsNew;
+    usrfctx -> iter = 0;
+    usrfctx -> k = k;
+
+    usrfctx -> values = (char **) palloc (2 * sizeof (char *));
+    usrfctx -> values  [0] = (char*) palloc   ((18 * 300 + 4) * sizeof (char));
+    usrfctx -> values  [1] = (char*) palloc  ((inputIdsSize * 8) * sizeof (char));
+    funcctx -> user_fctx = (void *)usrfctx;
+    outtertupdesc = CreateTemplateTupleDesc (2 , false);
+    TupleDescInitEntry (outtertupdesc,  1, "Vector",    FLOAT4ARRAYOID, -1, 0);
+    TupleDescInitEntry (outtertupdesc,  2, "Ids",INT4ARRAYOID,  -1, 0);
+    slot = TupleDescGetSlot (outtertupdesc);
+    funcctx -> slot = slot;
+    attinmeta = TupleDescGetAttInMetadata (outtertupdesc);
+    funcctx -> attinmeta = attinmeta;
+
+    MemoryContextSwitchTo (oldcontext);
+
+  }
+  funcctx = SRF_PERCALL_SETUP ();
+  usrfctx = (UsrFctxCluster*) funcctx -> user_fctx;
+
+ // return results
+  if (usrfctx->iter >= usrfctx->k){
+    SRF_RETURN_DONE (funcctx);
+  }else{
+
+    Datum result;
+    HeapTuple outTuple;
+    char* cursor;
+
+    // construct output values[0] -> cluster vector; values[1] -> id array
+    sprintf(usrfctx->values[0], "{ ");
+    cursor = usrfctx->values[0] + strlen("{ ");
+    for (int i = 0; i < 300; i++){
+      if (i < 299){
+        cursor += sprintf(cursor, "%f, ", usrfctx->centroids[usrfctx->iter][i]);
+      }else{
+        sprintf(cursor, "%f}", usrfctx->centroids[usrfctx->iter][i]);
+      }
+    }
+
+    sprintf(usrfctx->values[1], "{ ");
+    cursor = usrfctx->values[1] + strlen("{ ");
+    for (int i = 0; i < usrfctx->size; i++){
+      if (usrfctx->nearestCentroid[usrfctx->ids[i]] == usrfctx->iter){
+      cursor += sprintf(cursor, " %d,", usrfctx->ids[i]);
+      }
+    }
+    sprintf(cursor-1, "}");
+
+    usrfctx->iter++;
+    outTuple = BuildTupleFromCStrings (funcctx -> attinmeta,
+              usrfctx -> values);
+    result = TupleGetDatum (funcctx -> slot, outTuple);
+    SRF_RETURN_NEXT(funcctx, result);
+
+  }
 }
