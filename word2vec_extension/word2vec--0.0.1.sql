@@ -37,11 +37,11 @@ CREATE OR REPLACE FUNCTION ivfadc_search(anyarray, integer) RETURNS SETOF record
 AS '$libdir/word2vec', 'ivfadc_search'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE OR REPLACE FUNCTION top_k_in_pq(anyarray, integer, integer[]) RETURNS SETOF record
-AS '$libdir/word2vec', 'top_k_in_pq'
+CREATE OR REPLACE FUNCTION pq_search_in(anyarray, integer, integer[]) RETURNS SETOF record
+AS '$libdir/word2vec', 'pq_search_in'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE OR REPLACE FUNCTION cluster_pq(integer[], integer) RETURNS SETOF record
+CREATE OR REPLACE FUNCTION cluster_pq_to_id(integer[], integer) RETURNS SETOF record
 AS '$libdir/word2vec', 'cluster_pq'
 LANGUAGE C IMMUTABLE STRICT;
 
@@ -59,6 +59,90 @@ FETCH FIRST %s ROWS ONLY
 END
 $$
 LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc(term varchar(100), k integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS
+$$ SELECT fine_quantization.word, distance FROM google_vecs_norm AS gv, ivfadc_search(gv.vector, k) AS (idx integer, distance float4) INNER JOIN fine_quantization ON idx = fine_quantization.id WHERE gv.word = term;
+$$
+LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc(input_vector anyarray, k integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS
+$$ SELECT fine_quantization.word, distance FROM ivfadc_search(input_vector, k) AS (idx integer, distance float4) INNER JOIN fine_quantization ON idx = fine_quantization.id;
+$$
+LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION k_nearest_neighbour_pq(term varchar(100), k integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS
+$$ SELECT pq_quantization.word AS word, distance AS distance FROM google_vecs_norm AS gv, pq_search(gv.vector, k) AS (idx integer, distance float4) INNER JOIN pq_quantization ON idx = pq_quantization.id WHERE gv.word = term;
+$$
+LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION k_nearest_neighbour_pq(input_vector anyarray, k integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS
+$$ SELECT pq_quantization.word AS word, distance AS distance FROM pq_search(input_vector, k) AS (idx integer, distance float4) INNER JOIN pq_quantization ON idx = pq_quantization.id;
+$$
+LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION top_k_in_pq(term varchar(100), k integer, input_set integer[]) RETURNS TABLE (word varchar(100), squareDistance float4) AS
+$$ SELECT pq_quantization.word, distance FROM google_vecs_norm AS gv, pq_search_in(gv.vector, k, input_set)
+AS (result_id integer, distance float4) INNER JOIN pq_quantization ON result_id = pq_quantization.id
+WHERE gv.word = term;
+$$
+LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION top_k_in_pq(query_vector anyarray, k integer, input_set integer[]) RETURNS TABLE (word varchar(100), squareDistance float4) AS
+$$ SELECT pq_quantization.word, distance FROM pq_search_in(query_vector, k, input_set)
+AS (result_id integer, distance float4) INNER JOIN pq_quantization ON result_id = pq_quantization.id;
+$$
+LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION top_k_in_pq(term varchar(100), k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), squareDistance float4) AS
+$$ SELECT pq_quantization.word, distance FROM google_vecs_norm AS gv, pq_search_in(gv.vector, k, ARRAY(SELECT id FROM google_vecs_norm WHERE word = ANY (input_set)))
+AS (result_id integer, distance float4) INNER JOIN pq_quantization ON result_id = pq_quantization.id
+WHERE gv.word = term;
+$$
+LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION top_k_in_pq(query_vector anyarray, k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), squareDistance float4) AS
+$$ SELECT pq_quantization.word, distance FROM pq_search_in(query_vector, k, ARRAY(SELECT id FROM google_vecs_norm WHERE word = ANY (input_set)))
+AS (result_id integer, distance float4) INNER JOIN pq_quantization ON result_id = pq_quantization.id;
+$$
+LANGUAGE sql IMMUTABLE;
+
+-- TopK_In Exakt
+CREATE OR REPLACE FUNCTION top_k_in(term varchar(100), k integer, input_set integer[]) RETURNS TABLE (word varchar(100), similarity float8) AS $$
+DECLARE
+table_name varchar;
+BEGIN
+EXECUTE 'SELECT get_vecs_name()' INTO table_name;
+RETURN QUERY EXECUTE format('
+SELECT v2.word, cosine_similarity_norm(v1.vector, v2.vector) FROM %s AS v2
+INNER JOIN %s AS v1 ON v1.word = ''%s''
+WHERE v2.id = ANY (''%s''::integer[])
+ORDER BY cosine_similarity_norm(v1.vector, v2.vector) DESC
+FETCH FIRST %s ROWS ONLY
+', table_name, table_name, term, input_set, k);
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION top_k_in(term varchar(100), k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), similarity float8) AS $$
+DECLARE
+table_name varchar;
+BEGIN
+EXECUTE 'SELECT get_vecs_name()' INTO table_name;
+RETURN QUERY EXECUTE format('
+SELECT v2.word, cosine_similarity_norm(v1.vector, v2.vector) FROM %s AS v2
+INNER JOIN %s AS v1 ON v1.word = ''%s''
+WHERE v2.word = ANY (''%s''::varchar(100)[])
+ORDER BY cosine_similarity_norm(v1.vector, v2.vector) DESC
+FETCH FIRST %s ROWS ONLY
+', table_name, table_name, term, input_set, k);
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION cluster_pq(terms varchar(100)[], k integer) RETURNS  TABLE (words varchar(100)[]) AS
+$$ SELECT array_agg(word) FROM google_vecs_norm, cluster_pq_to_id(ARRAY(SELECT id FROM google_vecs_norm WHERE word = ANY (terms)), k) AS (centroid float4[], ids int[]) WHERE id = ANY ((ids)::integer[]) GROUP BY centroid;
+$$
+LANGUAGE sql IMMUTABLE;
 
 -- note: maybe different variances of analogy possible
 CREATE OR REPLACE FUNCTION analogy(w1 varchar(100), w2 varchar(100), w3 varchar(100), OUT result varchar(100))

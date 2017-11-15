@@ -454,6 +454,8 @@ ivfadc_search(PG_FUNCTION_ARGS)
      queryVector[j] = DatumGetFloat4(queryData[j]);
    }
 
+   // TODO from here on loop
+
    // get coarse_quantization(queryVector) (id)
    for (int i=0; i < cqSize; i++){
      float dist = squareDistance(queryVector, cq[i].vector, n);
@@ -566,10 +568,10 @@ ivfadc_search(PG_FUNCTION_ARGS)
   }
 }
 
-PG_FUNCTION_INFO_V1(top_k_in_pq);
+PG_FUNCTION_INFO_V1(pq_search_in);
 
 Datum
-top_k_in_pq(PG_FUNCTION_ARGS)
+pq_search_in(PG_FUNCTION_ARGS)
 {
 
   FuncCallContext *funcctx;
