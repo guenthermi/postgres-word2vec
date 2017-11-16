@@ -26,12 +26,21 @@ typedef struct WordVectors{
   float** vectors;
 } WordVectors;
 
+typedef struct Blacklist{
+  int id;
+  bool isValid; // id and next are only valid if isValid = true
+  struct Blacklist* next;
+} Blacklist;
 
 typedef CodebookEntry* Codebook;
 
 typedef CoarseQuantizerEntry* CoarseQuantizer;
 
-void updateTopK(TopK tk, float distance, int id, int k, int maxDist);
+void updateTopK(TopK tk, float distance, int id, int k, int maxDist, int bestPos);
+
+bool inBlacklist(int id, Blacklist* bl);
+
+void addToBlacklist(int id, Blacklist* bl, Blacklist* emptyBl);
 
 float squareDistance(float* v1, float* v2, int n);
 

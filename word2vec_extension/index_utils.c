@@ -9,9 +9,9 @@
 #include "utils/builtins.h"
 #include "utils/array.h"
 
-void updateTopK(TopK tk, float distance, int id, int k, int maxDist){
+void updateTopK(TopK tk, float distance, int id, int k, int maxDist, int bestPos){
   int i;
-  for (i = k-1; i >= 0; i--){
+  for (i = k-1; i >= bestPos; i--){
     if (tk[i].distance < distance){
       break;
     }
@@ -23,6 +23,27 @@ void updateTopK(TopK tk, float distance, int id, int k, int maxDist){
   }
   tk[i].distance = distance;
   tk[i].id = id;
+}
+
+bool inBlacklist(int id, Blacklist* bl){
+  if (bl->isValid){
+    if (bl->id == id){
+      return true;
+    }else{
+      return inBlacklist(id, bl->next);
+    }
+  }else{
+    return false;
+  }
+}
+
+void addToBlacklist(int id, Blacklist* bl, Blacklist* emptyBl){
+  while (bl->isValid){
+    bl = bl->next;
+  }
+  bl->id = id;
+  bl->next = emptyBl;
+  bl->isValid = true;
 }
 
 float squareDistance(float* v1, float* v2, int n){

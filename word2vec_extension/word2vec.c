@@ -329,7 +329,7 @@ pq_search(PG_FUNCTION_ARGS)
           distance += querySimilarities[j*cbCodes + code];
         }
         if (distance < maxDist){
-          updateTopK(topK, distance, wordId, k, maxDist);
+          updateTopK(topK, distance, wordId, k, maxDist, 0);
           maxDist = topK[k-1].distance;
         }
       }
@@ -408,6 +408,7 @@ ivfadc_search(PG_FUNCTION_ARGS)
 
     float* queryVector;
     int k;
+    int queryDim;
 
     float* residualVector;
 
@@ -429,8 +430,12 @@ ivfadc_search(PG_FUNCTION_ARGS)
     float maxDist;
 
     // for coarse quantizer
-    float minDist = 1000; // sufficient high value
+    float minDist; // sufficient high value
     int cqId = -1;
+
+    int bestPos;
+    int foundInstances;
+    Blacklist bl;
 
     funcctx = SRF_FIRSTCALL_INIT ();
     oldcontext = MemoryContextSwitchTo (funcctx->multi_call_memory_ctx);
@@ -450,81 +455,106 @@ ivfadc_search(PG_FUNCTION_ARGS)
    get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
    deconstruct_array(queryArg, eltype, typlen, typbyval, typalign, &queryData, &nulls, &n);
    queryVector = palloc(n*sizeof(float));
-   for (int j=0; j< n; j++){
+   queryDim = n;
+   for (int j=0; j< queryDim; j++){
      queryVector[j] = DatumGetFloat4(queryData[j]);
    }
 
-   // TODO from here on loop
+   foundInstances = 0;
+   bl.isValid = false;
 
-   // get coarse_quantization(queryVector) (id)
-   for (int i=0; i < cqSize; i++){
-     float dist = squareDistance(queryVector, cq[i].vector, n);
-     if (dist < minDist){
-       minDist = dist;
-       cqId = i;
+   topK = palloc(k*sizeof(TopKEntry));
+   maxDist = 100.0; // sufficient high value
+   for (int i = 0; i < k; i++){
+     topK[i].distance = 100.0;
+     topK[i].id = -1;
+   }
+
+   while (foundInstances < k){
+
+     Blacklist* newBl;
+
+     bestPos = foundInstances;
+
+     // get coarse_quantization(queryVector) (id)
+     minDist = 1000;
+     for (int i=0; i < cqSize; i++){
+       float dist;
+
+       if (inBlacklist(i, &bl)){
+         continue;
+       }
+       dist = squareDistance(queryVector, cq[i].vector, n);
+       if (dist < minDist){
+         minDist = dist;
+         cqId = i;
+       }
      }
-   }
 
-   // compute residual = queryVector - coarse_quantization(queryVector)
-   residualVector = palloc(n*sizeof(float));
-   for (int i = 0; i < n; i++){
-     residualVector[i] = queryVector[i] - cq[cqId].vector[i];
-   }
+     // add coarse quantizer to Blacklist
+     newBl = palloc(sizeof(Blacklist));
+     newBl->isValid = false;
 
-   // compute subvector similarities lookup
-   // determine similarities of codebook entries to residual vector
-   querySimilarities = palloc(cbPositions*cbCodes*sizeof(float));
-   for (int i=0; i< cbPositions*cbCodes; i++){
-       int pos = residualCb[i].pos;
-       int code = residualCb[i].code;
-       float* vector = residualCb[i].vector;
-       querySimilarities[pos*cbCodes + code] = squareDistance(residualVector+(pos*25), vector, 25);
-   }
+     addToBlacklist(cqId, &bl, newBl);
 
-    // calculate TopK by summing up squared distanced sum method
-    topK = palloc(k*sizeof(TopKEntry));
-    maxDist = 100.0; // sufficient high value
-    for (int i = 0; i < k; i++){
-      topK[i].distance = 100.0;
-      topK[i].id = -1;
-    }
+     // compute residual = queryVector - coarse_quantization(queryVector)
+     residualVector = palloc(queryDim*sizeof(float));
+     for (int i = 0; i < queryDim; i++){
+       residualVector[i] = queryVector[i] - cq[cqId].vector[i];
+     }
 
-    // connect to databse and compute approximated similarities with sum method
-    SPI_connect();
-    sprintf(command, "SELECT id, vector FROM fine_quantization WHERE coarse_id = %d", cq[cqId].id);
-    ret = SPI_exec(command, 0);
-    proc = SPI_processed;
-    if (ret > 0 && SPI_tuptable != NULL){
-      TupleDesc tupdesc = SPI_tuptable->tupdesc;
-      SPITupleTable *tuptable = SPI_tuptable;
-      int i;
-      for (i = 0; i < proc; i++){
-        Datum id;
-        Datum vector;
-        Datum* data;
-        ArrayType* vectorAt;
-        int wordId;
-        float distance;
+     // compute subvector similarities lookup
+     // determine similarities of codebook entries to residual vector
+     querySimilarities = palloc(cbPositions*cbCodes*sizeof(float));
+     for (int i=0; i< cbPositions*cbCodes; i++){
+         int pos = residualCb[i].pos;
+         int code = residualCb[i].code;
+         float* vector = residualCb[i].vector;
+         querySimilarities[pos*cbCodes + code] = squareDistance(residualVector+(pos*25), vector, 25);
+     }
 
-        HeapTuple tuple = tuptable->vals[i];
-        id = SPI_getbinval(tuple, tupdesc, 1, &info);
-        vector = SPI_getbinval(tuple, tupdesc, 2, &info);
-        wordId = DatumGetInt32(id);
-        vectorAt = DatumGetArrayTypeP(vector);
-        eltype = ARR_ELEMTYPE(vectorAt);
-        get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
-        deconstruct_array(vectorAt, eltype, typlen, typbyval, typalign, &data, &nulls, &n);
-        distance = 0;
-        for (int j = 0; j < n; j++){
-          int code = DatumGetInt32(data[j]);
-          distance += querySimilarities[j*cbCodes + code];
+      // calculate TopK by summing up squared distanced sum method
+
+      // connect to databse and compute approximated similarities with sum method
+      SPI_connect();
+      sprintf(command, "SELECT id, vector FROM fine_quantization WHERE coarse_id = %d", cq[cqId].id);
+      ret = SPI_exec(command, 0);
+      proc = SPI_processed;
+      if (ret > 0 && SPI_tuptable != NULL){
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        SPITupleTable *tuptable = SPI_tuptable;
+        int i;
+        for (i = 0; i < proc; i++){
+          Datum id;
+          Datum vector;
+          Datum* data;
+          ArrayType* vectorAt;
+          int wordId;
+          float distance;
+
+          HeapTuple tuple = tuptable->vals[i];
+          id = SPI_getbinval(tuple, tupdesc, 1, &info);
+          vector = SPI_getbinval(tuple, tupdesc, 2, &info);
+          wordId = DatumGetInt32(id);
+          vectorAt = DatumGetArrayTypeP(vector);
+          eltype = ARR_ELEMTYPE(vectorAt);
+          get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
+          deconstruct_array(vectorAt, eltype, typlen, typbyval, typalign, &data, &nulls, &n);
+          distance = 0;
+          for (int j = 0; j < n; j++){
+            int code = DatumGetInt32(data[j]);
+            distance += querySimilarities[j*cbCodes + code];
+          }
+          if (distance < maxDist){
+            updateTopK(topK, distance, wordId, k, maxDist, bestPos);
+            maxDist = topK[k-1].distance;
+          }
         }
-        if (distance < maxDist){
-          updateTopK(topK, distance, wordId, k, maxDist);
-          maxDist = topK[k-1].distance;
-        }
+        SPI_finish();
       }
-      SPI_finish();
+
+      foundInstances += proc;
+
     }
 
     freeCodebook(residualCb,cbPositions * cbCodes);
@@ -707,7 +737,7 @@ pq_search_in(PG_FUNCTION_ARGS)
           distance += querySimilarities[j*cbCodes + code];
         }
         if (distance < maxDist){
-          updateTopK(topK, distance, wordId, k, maxDist);
+          updateTopK(topK, distance, wordId, k, maxDist, 0);
           maxDist = topK[k-1].distance;
         }
       }
