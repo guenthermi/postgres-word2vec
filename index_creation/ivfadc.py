@@ -19,8 +19,11 @@ STD_DB_NAME = 'imdb'
 BATCH_SIZE = 50000
 
 COARSE_TABLE_NAME = 'coarse_quantization'
-FINE_TABLE_NAME = 'fine_quantization'
 CODEBOOK_TABLE_NAME = 'residual_codebook'
+FINE_TABLE_NAME = 'fine_quantization'
+
+IVFADC_INDEX_NAME = 'fine_quantization_word_idx'
+
 TABLE_INFORMATION = ((COARSE_TABLE_NAME,"(id serial PRIMARY KEY, vector float4[])"),
     (FINE_TABLE_NAME,"(id serial PRIMARY KEY, coarse_id integer REFERENCES {!s} (id), word varchar(100), vector int[])".format(COARSE_TABLE_NAME)),
     (CODEBOOK_TABLE_NAME, "(id serial PRIMARY KEY, pos int, code int, vector float4[])"))
@@ -166,6 +169,8 @@ def main(argc, argv):
     utils.init_tables(con, cur, TABLE_INFORMATION)
 
     add_to_database(words, cq, codebook, index, con, cur)
+
+    utils.create_index(FINE_TABLE_NAME, IVFADC_INDEX_NAME, 'word', con, cur)
 
 if __name__ == "__main__":
 	main(len(sys.argv), sys.argv)

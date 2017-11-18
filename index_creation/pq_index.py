@@ -19,6 +19,9 @@ BATCH_SIZE = 50000
 
 PQ_TABLE_NAME = 'pq_quantization'
 CODEBOOK_TABLE_NAME = 'pq_codebook'
+
+PQ_INDEX_NAME = 'pq_quantization_word_idx'
+
 TABLE_INFORMATION = ((PQ_TABLE_NAME,"(id serial PRIMARY KEY, word varchar(100), vector int[])"),
     (CODEBOOK_TABLE_NAME, "(id serial PRIMARY KEY, pos int, code int, vector float4[])"))
 
@@ -149,6 +152,8 @@ def main(argc, argv):
     cur = con.cursor()
     utils.init_tables(con, cur, TABLE_INFORMATION)
     add_to_database(words, codebook, index, con, cur)
+
+    utils.create_index(PQ_TABLE_NAME, PQ_INDEX_NAME, 'word', con, cur)
 
 if __name__ == "__main__":
 	main(len(sys.argv), sys.argv)

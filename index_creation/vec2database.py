@@ -5,6 +5,8 @@ import psycopg2
 import time
 import numpy as np
 
+import index_utils as utils
+
 STD_USER = 'postgres'
 STD_PASSWORD = 'postgres'
 STD_HOST = 'localhost'
@@ -12,6 +14,8 @@ STD_HOST = 'localhost'
 BATCH_SIZE = 50000
 
 VEC_TABLE_NAME = 'google_vecs_norm'
+VEC_INDEX_NAME = 'google_vecs_norm_word_idx'
+
 VEC_FILE_PATH = '../vectors/google_vecs.txt'
 
 NORMALIZED = True
@@ -121,6 +125,9 @@ def main(argc, argv):
 
     # commit changes
     con.commit()
+
+    # create index
+    utils.create_index(VEC_TABLE_NAME, VEC_INDEX_NAME, 'word', con, cur)
 
     # close connection
     con.close()

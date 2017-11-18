@@ -58,3 +58,8 @@ def serialize_vector(vec):
     for elem in vec:
         output_vec += str(elem) + ','
     return output_vec[:-1] + '}'
+
+def create_index(table_name, index_name, column_name, con, cur):
+    query_create_index = "CREATE INDEX " + index_name + " ON " +  table_name + " (" + column_name + ");"
+    cur.execute(query_create_index)
+    con.commit()
