@@ -29,6 +29,10 @@ CREATE OR REPLACE FUNCTION vec_plus(anyarray, anyarray) RETURNS anyarray
 AS '$libdir/word2vec', 'vec_plus'
 LANGUAGE C IMMUTABLE STRICT;
 
+CREATE OR REPLACE FUNCTION vec_normalize(anyarray) RETURNS anyarray
+AS '$libdir/word2vec', 'vec_normalize'
+LANGUAGE C IMMUTABLE STRICT;
+
 CREATE OR REPLACE FUNCTION pq_search(anyarray, integer) RETURNS SETOF record
 AS '$libdir/word2vec', 'pq_search'
 LANGUAGE C IMMUTABLE STRICT;
@@ -43,6 +47,10 @@ LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION cluster_pq_to_id(integer[], integer) RETURNS SETOF record
 AS '$libdir/word2vec', 'cluster_pq'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION centroid(anyarray) RETURNS anyarray
+AS '$libdir/word2vec', 'centroid'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION k_nearest_neighbour(term varchar(100), k integer) RETURNS TABLE (word varchar(100), similarity float8) AS $$
@@ -181,5 +189,83 @@ FETCH FIRST 1 ROWS ONLY
 END
 $$
 LANGUAGE plpgsql;
+
+-- w3 - w1 + w2
+CREATE OR REPLACE FUNCTION CosAdd(w1 varchar(100), w2 varchar(100), w3 varchar(100)) RETURNS TABLE (word varchar(100), similarity float8)
+AS  $$
+SELECT v4.word, cosine_similarity(vec_plus(vec_minus(v3.vector, v1.vector), v2.vector), v4.vector) FROM google_vecs AS v4
+INNER JOIN google_vecs AS v1 ON v1.word = w1
+INNER JOIN google_vecs AS v2 ON v2.word = w2
+INNER JOIN google_vecs AS v3 ON v3.word = w3
+ORDER BY cosine_similarity(vec_plus(vec_minus(v3.vector, v1.vector), v2.vector), v4.vector) DESC
+FETCH FIRST 5 ROWS ONLY;
+$$
+LANGUAGE sql IMMUTABLE;
+
+-- with postverification
+CREATE OR REPLACE FUNCTION CosAdd_pq(w1 varchar(100), w2 varchar(100), w3 varchar(100), OUT result varchar(100))
+AS  $$
+SELECT pq_quantization.word FROM
+google_vecs AS v1,
+google_vecs AS v2,
+google_vecs AS v3,
+pq_search(vec_normalize(vec_plus(vec_minus(v3.vector, v1.vector), v2.vector)), 100) AS (idx integer, distance float4)
+INNER JOIN pq_quantization ON idx = pq_quantization.id
+INNER JOIN google_vecs AS v4 ON v4.word = pq_quantization.word
+WHERE (v1.word = w1)
+AND (v2.word = w2)
+AND (v3.word = w3)
+AND (pq_quantization.word != v1.word)
+AND (pq_quantization.word != v2.word)
+AND (pq_quantization.word != v3.word)
+ORDER BY cosine_similarity(vec_plus(vec_minus(v3.vector, v1.vector), v2.vector), v4.vector) DESC
+FETCH FIRST 1 ROWS ONLY;
+$$
+LANGUAGE sql IMMUTABLE;
+
+-- with postverification
+CREATE OR REPLACE FUNCTION CosAdd_ivfadc(w1 varchar(100), w2 varchar(100), w3 varchar(100), OUT result varchar(100))
+AS  $$
+SELECT fine_quantization.word FROM
+google_vecs AS v1,
+google_vecs AS v2,
+google_vecs AS v3,
+ivfadc_search(vec_normalize(vec_plus(vec_minus(v3.vector, v1.vector), v2.vector)), 1000) AS (idx integer, distance float4)
+INNER JOIN  fine_quantization ON idx = fine_quantization.id
+INNER JOIN google_vecs AS v4 ON v4.word = fine_quantization.word
+WHERE (v1.word = w1)
+AND (v2.word = w2)
+AND (v3.word = w3)
+AND (fine_quantization.word != v1.word)
+AND (fine_quantization.word != v2.word)
+AND (fine_quantization.word != v3.word)
+ORDER BY cosine_similarity(vec_plus(vec_minus(v3.vector, v1.vector), v2.vector), v4.vector) DESC
+FETCH FIRST 1 ROWS ONLY;
+$$
+LANGUAGE sql IMMUTABLE;
+
+-- index makes no sense
+CREATE OR REPLACE FUNCTION grouping_func(terms varchar(100)[], groups varchar(100)[]) RETURNS TABLE (term varchar(100), groupterm varchar(100)) AS
+$$
+SELECT v1.word, gt.word
+FROM google_vecs_norm AS v1,
+top_k_in(v1.word, 1, groups) AS gt
+WHERE v1.word = ANY(terms);
+$$
+LANGUAGE sql IMMUTABLE;
+
+
+-- Tokenization + Normalization
+CREATE OR REPLACE FUNCTION tokenize(input text) RETURNS float4[] AS
+$$ SELECT vec_normalize(centroid(ARRAY(SELECT vector FROM google_vecs_norm WHERE word = ANY(regexp_split_to_array(input, ' ')))::float4[]));
+$$
+LANGUAGE sql IMMUTABLE;
+
+-- Tokenization without normalization
+CREATE OR REPLACE FUNCTION tokenize_raw(input text) RETURNS float4[] AS
+$$ SELECT centroid(ARRAY(SELECT vector FROM google_vecs_norm WHERE word = ANY(regexp_split_to_array(input, ' ')))::float4[]);
+$$
+LANGUAGE sql IMMUTABLE;
+
 
 -- CREATE OR REPLACE FUNCTION cosine_similarity(varchar(100), varchar(100), )
