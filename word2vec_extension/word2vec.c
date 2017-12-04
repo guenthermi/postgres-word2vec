@@ -29,6 +29,15 @@ typedef struct UsrFctxCluster {
   char **values;
 } UsrFctxCluster;
 
+typedef struct UsrFctxGrouping {
+  int* ids;
+  int size;
+  int* nearestGroup;
+  float** groupVecs;
+  int iter;
+  int groupsSize; // number of groups
+  char **values;
+} UsrFctxGrouping;
 
 PG_FUNCTION_INFO_V1(pq_search);
 
@@ -876,6 +885,233 @@ cluster_pq(PG_FUNCTION_ARGS)
       if (usrfctx->nearestCentroid[usrfctx->ids[i]] == usrfctx->iter){
       cursor += sprintf(cursor, " %d,", usrfctx->ids[i]);
       }
+    }
+    sprintf(cursor-1, "}");
+
+    usrfctx->iter++;
+    outTuple = BuildTupleFromCStrings (funcctx -> attinmeta,
+              usrfctx -> values);
+    result = TupleGetDatum (funcctx -> slot, outTuple);
+    SRF_RETURN_NEXT(funcctx, result);
+
+  }
+}
+
+PG_FUNCTION_INFO_V1(grouping_pq_to_id);
+
+Datum
+grouping_pq_to_id(PG_FUNCTION_ARGS)
+{
+  // input: array of ids to cluster, array of vectors for groups
+  // output: rows (id, group_vector)
+
+  FuncCallContext *funcctx;
+  TupleDesc        outtertupdesc;
+  TupleTableSlot  *slot;
+  AttInMetadata   *attinmeta;
+  UsrFctxGrouping *usrfctx;
+
+  if (SRF_IS_FIRSTCALL ()){
+
+    Oid eltype;
+    int16 typlen;
+    bool typbyval;
+    char typalign;
+    bool *nulls;
+    int n = 0;
+
+    MemoryContext  oldcontext;
+
+    Datum* idsData;
+    ArrayType* idArray;
+    AnyArrayType* groupidArray;
+
+    int numelems;
+    int nextelem = 0;
+    array_iter iter;
+
+    int* inputIds;
+    int inputIdsSize;
+
+    float** groupVecs;
+    int groupVecsSize;
+
+    float** querySimilarities;
+
+    Codebook cb;
+    int cbPositions = 0;
+    int cbCodes = 0;
+
+    int* nearestGroup;
+
+    int ret;
+    int proc;
+    bool info;
+    char* command;
+    char * cur;
+
+    funcctx = SRF_FIRSTCALL_INIT ();
+    oldcontext = MemoryContextSwitchTo (funcctx->multi_call_memory_ctx);
+
+    idArray = PG_GETARG_ARRAYTYPE_P(0);
+    groupidArray = PG_GETARG_ARRAYTYPE_P(1);
+
+    // read ids from function args
+
+    eltype = ARR_ELEMTYPE(idArray);
+    get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
+    deconstruct_array(idArray, eltype, typlen, typbyval, typalign, &idsData, &nulls, &n);
+    inputIds = palloc(n*sizeof(int));
+    for (int j=0; j< n; j++){
+      inputIds[j] = DatumGetInt32(idsData[j]);
+    }
+    inputIdsSize = n;
+
+    array_iter_setup(&iter, groupidArray);
+    numelems = ArrayGetNItems(AARR_NDIM(groupidArray), AARR_DIMS(groupidArray));
+
+    eltype = AARR_ELEMTYPE(groupidArray);
+    get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
+    if (AARR_NDIM(groupidArray) != 2){
+      elog(ERROR, "Input is not a 2-dimensional array");
+    }
+
+    n = AARR_DIMS(groupidArray)[1];
+    groupVecs = palloc(sizeof(float*)*n);
+    groupVecsSize = numelems / n;
+
+    while (nextelem < numelems)
+    {
+        int offset = nextelem++;
+        Datum elem;
+        elem = array_iter_next(&iter, &fcinfo->isnull, offset, typlen, typbyval, typalign);
+        if ((offset % n) == 0){
+          groupVecs[offset / n] = palloc(sizeof(float)*n);
+        }
+        groupVecs[offset / n][offset % n] = DatumGetFloat4(elem);
+    }
+
+    nearestGroup = palloc(sizeof(int)*(inputIdsSize));
+
+    // get pq codebook
+    cb = getCodebook(&cbPositions, &cbCodes, "pq_codebook");
+
+    querySimilarities = palloc(sizeof(float*) * groupVecsSize);
+
+    for (int cs = 0; cs < groupVecsSize; cs++){
+      querySimilarities[cs] = palloc(cbPositions*cbCodes*sizeof(float));
+      for (int i=0; i< cbPositions*cbCodes; i++){
+        int pos = cb[i].pos;
+        int code = cb[i].code;
+        float* vector = cb[i].vector;
+        querySimilarities[cs][pos*cbCodes + code] = squareDistance(groupVecs[cs]+(pos*25), vector, 25);
+      }
+    }
+    // get vectors for group_ids
+    // get codes for all entries with an id in inputIds -> SQL Query
+    SPI_connect();
+    command = palloc(200* sizeof(char) + inputIdsSize*8*sizeof(char));
+    sprintf(command, "SELECT pq_quantization.id, pq_quantization.vector FROM pq_quantization WHERE pq_quantization.id IN (");
+    // fill command
+    cur = command + strlen(command);
+    for (int i = 0; i < inputIdsSize; i++){
+      if ( i == inputIdsSize - 1){
+          cur += sprintf(cur, "%d", inputIds[i]);
+      }else{
+        cur += sprintf(cur, "%d, ", inputIds[i]);
+      }
+    }
+    cur += sprintf(cur, ")");
+
+    ret = SPI_exec(command, 0);
+    proc = SPI_processed;
+    inputIdsSize = proc;
+    if (ret > 0 && SPI_tuptable != NULL){
+      TupleDesc tupdesc = SPI_tuptable->tupdesc;
+      SPITupleTable *tuptable = SPI_tuptable;
+      int i;
+      for (i = 0; i < proc; i++){
+        Datum id;
+        Datum pqVector;
+
+        Datum* dataPqVector;
+
+        ArrayType* vectorAt;
+        float distance;
+        int pqSize;
+
+        // variables to determine best match
+        float minDist = 100; // sufficient high value
+
+        HeapTuple tuple = tuptable->vals[i];
+        id = SPI_getbinval(tuple, tupdesc, 1, &info);
+        pqVector = SPI_getbinval(tuple, tupdesc, 2, &info);
+
+        inputIds[i] = DatumGetInt32(id);
+        vectorAt = DatumGetArrayTypeP(pqVector);
+        eltype = ARR_ELEMTYPE(vectorAt);
+        get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
+        deconstruct_array(vectorAt, eltype, typlen, typbyval, typalign, &dataPqVector, &nulls, &n);
+        pqSize = n;
+
+
+        for (int groupIndex = 0; groupIndex < groupVecsSize; groupIndex++){
+          distance = 0;
+          for (int j = 0; j < pqSize; j++){
+            int code = DatumGetInt32(dataPqVector[j]);
+            distance += querySimilarities[groupIndex][j*cbCodes + code];
+          }
+
+          if (distance < minDist){
+            minDist = distance;
+            nearestGroup[i] = groupIndex;
+
+          }
+        }
+      }
+      SPI_finish();
+    }
+
+    usrfctx = (UsrFctxGrouping*) palloc (sizeof (UsrFctxGrouping));
+    usrfctx -> ids = inputIds;
+    usrfctx -> size = inputIdsSize;
+    usrfctx -> nearestGroup = nearestGroup;
+    usrfctx -> groupVecs = groupVecs;
+    usrfctx -> iter = 0;
+    usrfctx -> groupsSize = groupVecsSize;
+    usrfctx -> values = (char **) palloc (2 * sizeof (char *));
+    usrfctx -> values  [0] = (char*) palloc  ((18) * sizeof (char));
+    usrfctx -> values  [1] = (char*) palloc   ((18 * 300 + 4) * sizeof (char));
+    funcctx -> user_fctx = (void *)usrfctx;
+    outtertupdesc = CreateTemplateTupleDesc (2 , false);
+    TupleDescInitEntry (outtertupdesc,  1, "Ids",    INT4OID, -1, 0);
+    TupleDescInitEntry (outtertupdesc,  2, "Vectors",FLOAT4ARRAYOID,  -1, 0);
+    slot = TupleDescGetSlot (outtertupdesc);
+    funcctx -> slot = slot;
+    attinmeta = TupleDescGetAttInMetadata (outtertupdesc);
+    funcctx -> attinmeta = attinmeta;
+
+    MemoryContextSwitchTo (oldcontext);
+
+  }
+  funcctx = SRF_PERCALL_SETUP ();
+  usrfctx = (UsrFctxCluster*) funcctx -> user_fctx;
+
+ // return results
+  if (usrfctx->iter >= usrfctx->size){
+    SRF_RETURN_DONE (funcctx);
+  }else{
+
+    Datum result;
+    HeapTuple outTuple;
+    char* cursor;
+
+    sprintf(usrfctx->values[0], "%d", usrfctx->ids[usrfctx->iter]);
+
+    sprintf(usrfctx->values[1], "{ ");
+    cursor = usrfctx->values[1] + strlen("{ ");
+    for (int i = 0; i < 300; i++){
+      cursor += sprintf(cursor, " %f,", usrfctx -> groupVecs[usrfctx->nearestGroup[usrfctx->iter]][i]);
     }
     sprintf(cursor-1, "}");
 

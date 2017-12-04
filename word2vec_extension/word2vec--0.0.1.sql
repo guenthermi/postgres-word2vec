@@ -49,6 +49,12 @@ CREATE OR REPLACE FUNCTION cluster_pq_to_id(integer[], integer) RETURNS SETOF re
 AS '$libdir/word2vec', 'cluster_pq'
 LANGUAGE C IMMUTABLE STRICT;
 
+CREATE OR REPLACE FUNCTION grouping_pq_to_id(integer[], anyarray) RETURNS SETOF record
+AS '$libdir/word2vec', 'grouping_pq_to_id'
+LANGUAGE C IMMUTABLE STRICT;
+
+
+
 CREATE OR REPLACE FUNCTION centroid(anyarray) RETURNS anyarray
 AS '$libdir/word2vec', 'centroid'
 LANGUAGE C IMMUTABLE STRICT;
