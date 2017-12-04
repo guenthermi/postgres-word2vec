@@ -18,8 +18,8 @@ VEC_TABLE_NAME = 'google_vecs_norm'
 
 
 QUERY_SET_FULL = [('brute-force', 'SELECT v2.word FROM google_vecs_norm AS v2 ORDER BY cosine_similarity_norm({!s}, v2.vector) DESC FETCH FIRST {:d} ROWS ONLY'),
-('pq search', 'SELECT * FROM pq_search({!s}, {:d}) AS (id integer, distance float4);'),
-('ivfadc search', 'SELECT * FROM ivfadc_search({!s}, {:d}) AS (id integer, distance float4);')]
+('pq search', 'SELECT word FROM k_nearest_neighbour_pq({!s}, {:d});'),
+('ivfadc search', 'SELECT word FROM k_nearest_neighbour_ivfadc({!s}, {:d});')]
 QUERY_SET_TEST = [
 ('pq_search', 'SELECT * FROM pq_search({!s}, {:d}) AS (id integer, distance float4);'),
 ('ivfadc_search', 'SELECT * FROM ivfadc_search({!s}, {:d}) AS (id integer, distance float4);')]
@@ -45,22 +45,38 @@ def get_samples(con, cur, number, size):
 
 
 def measurement(cur, con, query_set, k, samples):
-    results = {}
+    time_values = {}
+    responses = {}
     count = 0
     for (name, query) in query_set:
-        results[name] = []
+        time_values[name] = []
+        responses[name] = {}
         print('Start Test for', name)
-        for sample in samples:
+        for i, sample in enumerate(samples):
             vector = serialize_vector(sample)
             rendered_query = query.format(vector, k)
             start = time.time()
             cur.execute(rendered_query)
             result = cur.fetchall()
             end = time.time()
-            results[name].append((end-start))
+            responses[name][i] = result
+            time_values[name].append((end-start))
             count += 1
             print('Iteration', count, 'completed')
-    return results
+    return time_values, responses
+
+def calculate_precision(responses, exact, threshold=5):
+    result = dict()
+    for name in responses.keys():
+        response = responses[name]
+        precs = []
+        for key in response.keys():
+            print(response[key], "vs.", exact[key])
+            print('len', len(response[key]))
+            print(set(response[key]), set(exact[key]), set.intersection(set(response[key]), set(exact[key])))
+            precs.append(len(set.intersection(set(response[key][:threshold]), set(exact[key])))/threshold)
+        result[name] = np.mean(precs)
+    return result
 
 def plot_graph(measured_data):
     data = []
@@ -81,7 +97,7 @@ def plot_graph(measured_data):
 
 def main(argc, argv):
     k = 5
-    number = 10
+    number = 100
     if argc == 3:
         k = int(argv[1])
         number = int(argv[2])
@@ -95,12 +111,13 @@ def main(argc, argv):
 
     data_size = get_vector_dataset_size(cur)
     samples = get_samples(con, cur, number, data_size)
-    values = measurement(cur, con, QUERY_SET_FULL, k, samples)
-    plot_graph(values)
+    time_values, responses = measurement(cur, con, QUERY_SET_FULL, k, samples)
+    precisions = calculate_precision(responses, responses['brute-force'])
+    plot_graph(time_values)
 
     print('Parameters k:', k, 'Number of Queries:', number)
-    for test in values.keys():
-        print('TEST', test, 'TIME_SUM:', sum(values[test]), 'TIME_SINGLE:', sum(values[test])/number)
+    for test in time_values.keys():
+        print('TEST', test, 'TIME_SUM:', sum(time_values[test]), 'TIME_SINGLE:', sum(time_values[test])/number, 'Precision', precisions[test])
 
 if __name__ == "__main__":
 	main(len(sys.argv), sys.argv)
