@@ -61,14 +61,7 @@ pq_search(PG_FUNCTION_ARGS)
 
      float* querySimilarities;
 
-     ArrayType* queryArg;
      Datum* queryData;
-
-     Oid eltype;
-     int16 typlen;
-     bool typbyval;
-     char typalign;
-     bool *nulls;
      int n = 0;
 
      MemoryContext  oldcontext;
@@ -84,16 +77,14 @@ pq_search(PG_FUNCTION_ARGS)
      funcctx = SRF_FIRSTCALL_INIT ();
      oldcontext = MemoryContextSwitchTo (funcctx->multi_call_memory_ctx);
 
-     queryArg = PG_GETARG_ARRAYTYPE_P(0);
      k = PG_GETARG_INT32(1);
 
      // get codebook
      cb = getCodebook(&cbPositions, &cbCodes, "pq_codebook");
 
     // read query from function args
-    eltype = ARR_ELEMTYPE(queryArg);
-    get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
-    deconstruct_array(queryArg, eltype, typlen, typbyval, typalign, &queryData, &nulls, &n);
+    getArray(PG_GETARG_ARRAYTYPE_P(0), &queryData, &n);
+
     queryVector = palloc(n*sizeof(float));
     for (int j=0; j< n; j++){
       queryVector[j] = DatumGetFloat4(queryData[j]);
@@ -127,7 +118,6 @@ pq_search(PG_FUNCTION_ARGS)
         Datum id;
         Datum vector;
         Datum* data;
-        ArrayType* vectorAt;
         int wordId;
         float distance;
 
@@ -135,10 +125,9 @@ pq_search(PG_FUNCTION_ARGS)
         id = SPI_getbinval(tuple, tupdesc, 1, &info);
         vector = SPI_getbinval(tuple, tupdesc, 2, &info);
         wordId = DatumGetInt32(id);
-        vectorAt = DatumGetArrayTypeP(vector);
-        eltype = ARR_ELEMTYPE(vectorAt);
-        get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
-        deconstruct_array(vectorAt, eltype, typlen, typbyval, typalign, &data, &nulls, &n);
+
+        getArray(DatumGetArrayTypeP(vector), &data, &n);
+
         distance = 0;
         for (int j = 0; j < n; j++){
           int code = DatumGetInt32(data[j]);
@@ -212,7 +201,6 @@ ivfadc_search(PG_FUNCTION_ARGS)
 
     MemoryContext  oldcontext;
 
-    ArrayType* queryArg;
     Datum* queryData;
 
     Codebook residualCb;
@@ -228,11 +216,6 @@ ivfadc_search(PG_FUNCTION_ARGS)
 
     float* residualVector;
 
-    Oid eltype;
-    int16 typlen;
-    bool typbyval;
-    char typalign;
-    bool *nulls;
     int n = 0;
 
     float* querySimilarities;
@@ -256,7 +239,6 @@ ivfadc_search(PG_FUNCTION_ARGS)
     funcctx = SRF_FIRSTCALL_INIT ();
     oldcontext = MemoryContextSwitchTo (funcctx->multi_call_memory_ctx);
 
-    queryArg = PG_GETARG_ARRAYTYPE_P(0);
     k = PG_GETARG_INT32(1);
 
 
@@ -267,9 +249,7 @@ ivfadc_search(PG_FUNCTION_ARGS)
     cq = getCoarseQuantizer(&cqSize);
 
    // read query from function args
-   eltype = ARR_ELEMTYPE(queryArg);
-   get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
-   deconstruct_array(queryArg, eltype, typlen, typbyval, typalign, &queryData, &nulls, &n);
+   getArray(PG_GETARG_ARRAYTYPE_P(0), &queryData, &n);
    queryVector = palloc(n*sizeof(float));
    queryDim = n;
    for (int j=0; j< queryDim; j++){
@@ -344,7 +324,6 @@ ivfadc_search(PG_FUNCTION_ARGS)
           Datum id;
           Datum vector;
           Datum* data;
-          ArrayType* vectorAt;
           int wordId;
           float distance;
 
@@ -352,10 +331,7 @@ ivfadc_search(PG_FUNCTION_ARGS)
           id = SPI_getbinval(tuple, tupdesc, 1, &info);
           vector = SPI_getbinval(tuple, tupdesc, 2, &info);
           wordId = DatumGetInt32(id);
-          vectorAt = DatumGetArrayTypeP(vector);
-          eltype = ARR_ELEMTYPE(vectorAt);
-          get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
-          deconstruct_array(vectorAt, eltype, typlen, typbyval, typalign, &data, &nulls, &n);
+          getArray(DatumGetArrayTypeP(vector), &data, &n);
           distance = 0;
           for (int j = 0; j < n; j++){
             int code = DatumGetInt32(data[j]);
@@ -432,20 +408,13 @@ pq_search_in(PG_FUNCTION_ARGS)
 
     int k;
 
-    ArrayType* queryArg;
     Datum* queryData;
     float* queryVector;
 
-    ArrayType* idArray;
     Datum* idsData;
     int* inputIds;
     int inputIdSize;
 
-    Oid eltype;
-    int16 typlen;
-    bool typbyval;
-    char typalign;
-    bool *nulls;
     int n = 0;
 
     Codebook cb;
@@ -467,23 +436,17 @@ pq_search_in(PG_FUNCTION_ARGS)
     funcctx = SRF_FIRSTCALL_INIT ();
     oldcontext = MemoryContextSwitchTo (funcctx->multi_call_memory_ctx);
 
-    queryArg = PG_GETARG_ARRAYTYPE_P(0);
     k = PG_GETARG_INT32(1);
-    idArray = PG_GETARG_ARRAYTYPE_P(2);
 
     // read query from function args
-    eltype = ARR_ELEMTYPE(queryArg);
-    get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
-    deconstruct_array(queryArg, eltype, typlen, typbyval, typalign, &queryData, &nulls, &n);
+    getArray(PG_GETARG_ARRAYTYPE_P(0), &queryData, &n);
     queryVector = palloc(n*sizeof(float));
     for (int j=0; j< n; j++){
       queryVector[j] = DatumGetFloat4(queryData[j]);
     }
 
     // read ids from function args
-    eltype = ARR_ELEMTYPE(idArray);
-    get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
-    deconstruct_array(idArray, eltype, typlen, typbyval, typalign, &idsData, &nulls, &n);
+    getArray(PG_GETARG_ARRAYTYPE_P(2), &idsData, &n);
     inputIds = palloc(n*sizeof(float));
     for (int j=0; j< n; j++){
       inputIds[j] = DatumGetInt32(idsData[j]);
@@ -535,7 +498,6 @@ pq_search_in(PG_FUNCTION_ARGS)
         Datum id;
         Datum vector;
         Datum* data;
-        ArrayType* vectorAt;
         int wordId;
         float distance;
 
@@ -543,10 +505,7 @@ pq_search_in(PG_FUNCTION_ARGS)
         id = SPI_getbinval(tuple, tupdesc, 1, &info);
         vector = SPI_getbinval(tuple, tupdesc, 2, &info);
         wordId = DatumGetInt32(id);
-        vectorAt = DatumGetArrayTypeP(vector);
-        eltype = ARR_ELEMTYPE(vectorAt);
-        get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
-        deconstruct_array(vectorAt, eltype, typlen, typbyval, typalign, &data, &nulls, &n);
+        getArray(DatumGetArrayTypeP(vector), &data, &n);
         distance = 0;
         for (int j = 0; j < n; j++){
           int code = DatumGetInt32(data[j]);
@@ -621,17 +580,11 @@ cluster_pq(PG_FUNCTION_ARGS)
 
   if (SRF_IS_FIRSTCALL ()){
 
-    Oid eltype;
-    int16 typlen;
-    bool typbyval;
-    char typalign;
-    bool *nulls;
     int n = 0;
 
     MemoryContext  oldcontext;
 
     Datum* idsData;
-    ArrayType* idArray;
 
     int* inputIds;
     int inputIdsSize;
@@ -665,7 +618,6 @@ cluster_pq(PG_FUNCTION_ARGS)
     funcctx = SRF_FIRSTCALL_INIT ();
     oldcontext = MemoryContextSwitchTo (funcctx->multi_call_memory_ctx);
 
-    idArray = PG_GETARG_ARRAYTYPE_P(0);
     k = PG_GETARG_INT32(1);
 
     iterations = 10;
@@ -675,10 +627,8 @@ cluster_pq(PG_FUNCTION_ARGS)
     nearestCentroid = palloc(sizeof(int)*(DATASET_SIZE+1));
 
     // read ids from function args
+    getArray(PG_GETARG_ARRAYTYPE_P(0), &idsData, &n);
 
-    eltype = ARR_ELEMTYPE(idArray);
-    get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
-    deconstruct_array(idArray, eltype, typlen, typbyval, typalign, &idsData, &nulls, &n);
     inputIds = palloc(n*sizeof(int));
     for (int j=0; j< n; j++){
       inputIds[j] = DatumGetInt32(idsData[j]);
@@ -771,7 +721,6 @@ cluster_pq(PG_FUNCTION_ARGS)
           Datum* dataPqVector;
           Datum* dataBigVector;
 
-          ArrayType* vectorAt;
           int wordId;
           float distance;
           int pqSize;
@@ -786,16 +735,10 @@ cluster_pq(PG_FUNCTION_ARGS)
 
           wordId = DatumGetInt32(id);
 
-          vectorAt = DatumGetArrayTypeP(pqVector);
-          eltype = ARR_ELEMTYPE(vectorAt);
-          get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
-          deconstruct_array(vectorAt, eltype, typlen, typbyval, typalign, &dataPqVector, &nulls, &n);
+          getArray(DatumGetArrayTypeP(pqVector), &dataPqVector, &n);
           pqSize = n;
 
-          vectorAt = DatumGetArrayTypeP(bigVector);
-          eltype = ARR_ELEMTYPE(vectorAt);
-          get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
-          deconstruct_array(vectorAt, eltype, typlen, typbyval, typalign, &dataBigVector, &nulls, &n);
+          getArray(DatumGetArrayTypeP(bigVector), &dataBigVector, &n);
 
 
 
@@ -917,13 +860,12 @@ grouping_pq_to_id(PG_FUNCTION_ARGS)
     int16 typlen;
     bool typbyval;
     char typalign;
-    bool *nulls;
+    //bool *nulls;
     int n = 0;
 
     MemoryContext  oldcontext;
 
     Datum* idsData;
-    ArrayType* idArray;
     AnyArrayType* groupidArray;
 
     int numelems;
@@ -953,14 +895,11 @@ grouping_pq_to_id(PG_FUNCTION_ARGS)
     funcctx = SRF_FIRSTCALL_INIT ();
     oldcontext = MemoryContextSwitchTo (funcctx->multi_call_memory_ctx);
 
-    idArray = PG_GETARG_ARRAYTYPE_P(0);
     groupidArray = PG_GETARG_ARRAYTYPE_P(1);
 
     // read ids from function args
 
-    eltype = ARR_ELEMTYPE(idArray);
-    get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
-    deconstruct_array(idArray, eltype, typlen, typbyval, typalign, &idsData, &nulls, &n);
+    getArray(PG_GETARG_ARRAYTYPE_P(0), &idsData, &n);
     inputIds = palloc(n*sizeof(int));
     for (int j=0; j< n; j++){
       inputIds[j] = DatumGetInt32(idsData[j]);
@@ -1036,7 +975,6 @@ grouping_pq_to_id(PG_FUNCTION_ARGS)
 
         Datum* dataPqVector;
 
-        ArrayType* vectorAt;
         float distance;
         int pqSize;
 
@@ -1048,10 +986,7 @@ grouping_pq_to_id(PG_FUNCTION_ARGS)
         pqVector = SPI_getbinval(tuple, tupdesc, 2, &info);
 
         inputIds[i] = DatumGetInt32(id);
-        vectorAt = DatumGetArrayTypeP(pqVector);
-        eltype = ARR_ELEMTYPE(vectorAt);
-        get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
-        deconstruct_array(vectorAt, eltype, typlen, typbyval, typalign, &dataPqVector, &nulls, &n);
+        getArray(DatumGetArrayTypeP(pqVector), &dataPqVector, &n);
         pqSize = n;
 
 
@@ -1095,7 +1030,7 @@ grouping_pq_to_id(PG_FUNCTION_ARGS)
 
   }
   funcctx = SRF_PERCALL_SETUP ();
-  usrfctx = (UsrFctxCluster*) funcctx -> user_fctx;
+  usrfctx = (UsrFctxGrouping*) funcctx -> user_fctx;
 
  // return results
   if (usrfctx->iter >= usrfctx->size){

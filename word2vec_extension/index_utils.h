@@ -2,6 +2,7 @@
 #define INDEX_UTILS_H
 
 #include "postgres.h"
+#include "utils/array.h"
 
 typedef struct TopKEntry{
   int id;
@@ -55,5 +56,7 @@ void freeCodebook(Codebook cb, int size);
 WordVectors getVectors(char* tableName, int* ids, int idsSize);
 
 void freeWordVectors(WordVectors vectors, int size);
+
+void getArray(ArrayType* input, Datum** result, int* n);
 
 #endif /*INDEX_UTILS_H*/

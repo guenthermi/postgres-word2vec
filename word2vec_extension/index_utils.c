@@ -271,3 +271,15 @@ void freeWordVectors(WordVectors vectors, int size){
   free(vectors.vectors);
   free(vectors.ids);
 }
+
+void getArray(ArrayType* input, Datum** result, int* n){
+  Oid i_eltype;
+  int16 i_typlen;
+  bool i_typbyval;
+  char i_typalign;
+  bool *nulls;
+
+  i_eltype = ARR_ELEMTYPE(input);
+  get_typlenbyvalalign(i_eltype, &i_typlen, &i_typbyval, &i_typalign);
+  deconstruct_array(input, i_eltype, i_typlen, i_typbyval, i_typalign, result, &nulls, n);
+}
