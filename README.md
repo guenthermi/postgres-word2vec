@@ -46,6 +46,12 @@ We implemented two types of index structures to accelerate word embedding operat
 | Product Quantization  | 0.93s         | 0.30          |
 | IVFADC                | 0.27s         | 0.31          |
 
+**Parameters:**
+* Number of subvectors per vector: 12
+* Number of centroids for fine quantization (PQ and IVFADC): 256
+* Number of centroids for coarse quantization: 1000
+
+![time measurement](evaluation/time_measurment.png)
 
 ## Installation
 At first, you need to setup a [Postgres server](https://www.postgresql.org/). You have to install [faiss](https://github.com/facebookresearch/faiss) and a few other python libraries to run the import scripts.
