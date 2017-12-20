@@ -6,10 +6,23 @@ FREDDY is a system based on Postgres which is able to use word embeddings exhibi
 
 ### Similarity Queries
 ```
-SELECT cosine_similarity('king', 'queen');
-
+cosine_similarity(float[], float[])
 ```
+**Example**
+```
+SELECT keyword
+FROM keywords AS k
+INNER JOIN word_embeddings AS v ON k.keyword = v.word
+INNER JOIN word_embeddings AS w ON w.word = 'comedy'
+ORDER BY cosine_similarity(w.vector, v.vector) DESC;
+```
+
 ### Analogy Queries based on 3CosAdd
+```
+cosadd_pq(float[], float[], float[])
+cosadd_pq(varchar, varchar, varchar)
+```
+**Example**
 ```
 SELECT *
 FROM cosadd_pq('Francis_Ford_Coppola', 'Godfather', 'Christopher_Nolan');
@@ -18,12 +31,22 @@ FROM cosadd_pq('Francis_Ford_Coppola', 'Godfather', 'Christopher_Nolan');
 ### K Nearest Neighbour Queries
 
 ```
-SELECT *
-FROM k_nearest_neighbour_ivfadc('birch', 5);
+k_nearest_neighbour_ivfadc(float[], int)
+k_nearest_neighbour_ivfadc(varchar, int)
+```
+**Example**
+```
+SELECT m.title, t.word, t.squaredistance
+FROM movies AS m, k_nearest_neighbour_ivfadc(m.title, 3) AS t
+ORDER BY m.title ASC, t.squaredistance DESC;
 ```
 
 ### K Nearest Neighbour Queries with Specific Output Set
 
+```
+top_k_in_pq(varchar, int, varchar[]);
+```
+**Example**
 ```
 SELECT * FROM
 top_k_in_pq('Godfather', 5, ARRAY(SELECT title FROM movies));
@@ -31,6 +54,10 @@ top_k_in_pq('Godfather', 5, ARRAY(SELECT title FROM movies));
 
 ### Grouping
 
+```
+grouping_func(varchar[], varchar[])
+```
+**Example**
 ```
 SELECT term, groupterm
 FROM grouping_func(ARRAY(SELECT title FROM movies), '{Europe,America}');
