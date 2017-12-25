@@ -1,23 +1,29 @@
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION word2vec" to load this file. \quit
 
-CREATE OR REPLACE FUNCTION init(_tbl regclass) RETURNS void AS $$
+CREATE OR REPLACE FUNCTION init(original regclass, normalized regclass, pq_quantization regclass, codebook regclass, residual_quantization regclass, coarse_quantization regclass, residual_codebook regclass) RETURNS void AS $$
 BEGIN
-EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', _tbl);
+EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name_original() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', original);
+EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', normalized);
+EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name_pq_quantization() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', pq_quantization);
+EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name_codebook() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', codebook);
+EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name_residual_quantization() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', residual_quantization);
+EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name_coarse_quantization() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', coarse_quantization);
+EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name_residual_codebook() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', residual_codebook);
 END
 $$
 LANGUAGE plpgsql;
 
 SELECT CASE (SELECT count(proname) FROM pg_proc WHERE proname='get_vecs_name')
-  WHEN 0 THEN init('google_vecs')
+  WHEN 0 THEN init('google_vecs', 'google_vecs_norm', 'pq_quantization', 'pq_codebook', 'fine_quantization', 'coarse_quantization', 'residual_codebook')
   END;
 
 
-CREATE OR REPLACE FUNCTION cosine_similarity(anyarray, anyarray) RETURNS float8
+CREATE OR REPLACE FUNCTION cosine_similarity(float4[], float4[]) RETURNS float8
 AS '$libdir/word2vec', 'cosine_similarity'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE OR REPLACE FUNCTION cosine_similarity_norm(anyarray, anyarray) RETURNS float8
+CREATE OR REPLACE FUNCTION cosine_similarity_norm(float4[], float4[]) RETURNS float8
 AS '$libdir/word2vec', 'cosine_similarity_norm'
 LANGUAGE C IMMUTABLE STRICT;
 
@@ -53,6 +59,10 @@ CREATE OR REPLACE FUNCTION grouping_pq_to_id(integer[], anyarray) RETURNS SETOF 
 AS '$libdir/word2vec', 'grouping_pq_to_id'
 LANGUAGE C IMMUTABLE STRICT;
 
+CREATE OR REPLACE FUNCTION pq_search_in_cplx(anyarray, integer, varchar(100)[]) RETURNS SETOF record
+AS '$libdir/word2vec', 'pq_search_in_cplx'
+LANGUAGE C IMMUTABLE STRICT;
+
 
 
 CREATE OR REPLACE FUNCTION centroid(anyarray) RETURNS anyarray
@@ -69,7 +79,7 @@ SELECT v2.word, cosine_similarity_norm(v1.vector, v2.vector) FROM %s AS v2
 INNER JOIN %s AS v1 ON v1.word = ''%s''
 ORDER BY cosine_similarity_norm(v1.vector, v2.vector) DESC
 FETCH FIRST %s ROWS ONLY
-', table_name, table_name, term, k);
+', table_name, table_name, replace(term, '''', ''''''), k);
 END
 $$
 LANGUAGE plpgsql;
@@ -120,6 +130,15 @@ AS (result_id integer, distance float4) INNER JOIN pq_quantization ON result_id 
 $$
 LANGUAGE sql IMMUTABLE;
 
+CREATE OR REPLACE FUNCTION cosine_similarity(term1 varchar(100), term2 varchar(100)) RETURNS float8 AS
+$$ SELECT cosine_similarity(t1.vector, t2.vector) FROM google_vecs_norm as t1, google_vecs_norm AS t2 WHERE (t1.word = term1) AND (t2.word = term2);
+$$
+LANGUAGE sql IMMUTABLE;
+
+-- CREATE OR REPLACE FUNCTION cosine_similarity_norm(anyarray, anyarray) RETURNS float8
+-- AS '$libdir/word2vec', 'cosine_similarity_norm'
+-- LANGUAGE C IMMUTABLE STRICT;
+
 -- TopK_In Exakt
 CREATE OR REPLACE FUNCTION top_k_in(term varchar(100), k integer, input_set integer[]) RETURNS TABLE (word varchar(100), similarity float8) AS $$
 DECLARE
@@ -132,7 +151,7 @@ INNER JOIN %s AS v1 ON v1.word = ''%s''
 WHERE v2.id = ANY (''%s''::integer[])
 ORDER BY cosine_similarity_norm(v1.vector, v2.vector) DESC
 FETCH FIRST %s ROWS ONLY
-', table_name, table_name, term, input_set, k);
+', table_name, table_name, replace(term, '''', ''''''), input_set, k);
 END
 $$
 LANGUAGE plpgsql;
@@ -140,15 +159,20 @@ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION top_k_in(term varchar(100), k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), similarity float8) AS $$
 DECLARE
 table_name varchar;
+formated varchar(100)[];
 BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
+-- execute replace on every element of input set
+FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
+  formated[I] = replace(input_set[I], '''', '''''');
+END LOOP;
 RETURN QUERY EXECUTE format('
 SELECT v2.word, cosine_similarity_norm(v1.vector, v2.vector) FROM %s AS v2
 INNER JOIN %s AS v1 ON v1.word = ''%s''
 WHERE v2.word = ANY (''%s''::varchar(100)[])
 ORDER BY cosine_similarity_norm(v1.vector, v2.vector) DESC
 FETCH FIRST %s ROWS ONLY
-', table_name, table_name, term, input_set, k);
+', table_name, table_name, replace(term, '''', ''''''), formated, k);
 END
 $$
 LANGUAGE plpgsql;

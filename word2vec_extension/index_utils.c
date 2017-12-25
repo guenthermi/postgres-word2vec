@@ -25,6 +25,35 @@ void updateTopK(TopK tk, float distance, int id, int k, int maxDist, int bestPos
   tk[i].id = id;
 }
 
+void updateTopKWordEntry(char** term, char* word){
+  char* cur = word;
+  memset(word,0,strlen(word));
+  for (int p = 0; term[p]; p++){
+    if (term[p+1] == NULL){
+      cur += sprintf(cur, "%s", term[p]);
+    }else{
+      cur += sprintf(cur, "%s ", term[p]);
+    }
+  }
+}
+
+void updateTopKCplx(TopKCplx tk, float distance, char** term, int k, int maxDist, int bestPos){
+  int i;
+  for (i = k-1; i >= bestPos; i--){
+    if (tk[i].distance < distance){
+      break;
+    }
+  }
+  i++;
+  for (int j = k-2; j >= i; j--){
+    tk[j+1].distance = tk[j].distance;
+    strcpy(tk[j+1].word, tk[j].word);
+  }
+  tk[i].distance = distance;
+  updateTopKWordEntry(term, tk[i].word);
+}
+
+
 bool inBlacklist(int id, Blacklist* bl){
   if (bl->isValid){
     if (bl->id == id){
@@ -84,8 +113,13 @@ CoarseQuantizer getCoarseQuantizer(int* size){
   int ret;
   int proc;
   CoarseQuantizer result;
+
+  char* tableNameCQ = palloc(sizeof(char)*100);
+  getTableName(COARSE_QUANTIZATION, tableNameCQ, 100);
+
   SPI_connect();
-  command = "SELECT * FROM coarse_quantization";
+  command = palloc(100*sizeof(char));
+  sprintf(command, "SELECT * FROM %s", tableNameCQ);
   ret = SPI_exec(command, 0);
   proc = SPI_processed;
   *size = proc;
@@ -282,4 +316,75 @@ void getArray(ArrayType* input, Datum** result, int* n){
   i_eltype = ARR_ELEMTYPE(input);
   get_typlenbyvalalign(i_eltype, &i_typlen, &i_typbyval, &i_typalign);
   deconstruct_array(input, i_eltype, i_typlen, i_typbyval, i_typalign, result, &nulls, n);
+}
+
+void getTableName(tableType type, char* name, int bufferSize){
+  char* command;
+  int ret;
+  int proc;
+
+  const char* function_names[] = {
+    "get_vecs_name_original()",
+    "get_vecs_name()",
+    "get_vecs_name_pq_quantization()",
+    "get_vecs_name_codebook()",
+    "get_vecs_name_residual_quantization()",
+    "get_vecs_name_coarse_quantization()",
+    "get_vecs_name_residual_codebook()"};
+
+  SPI_connect();
+
+  command = palloc(100*sizeof(char));
+  sprintf(command, "SELECT * FROM %s", function_names[type]);
+
+  ret = SPI_exec(command, 0);
+  proc = SPI_processed;
+  if (ret > 0 && SPI_tuptable != NULL){
+    TupleDesc tupdesc = SPI_tuptable->tupdesc;
+    SPITupleTable *tuptable = SPI_tuptable;
+    HeapTuple tuple;
+    if (proc != 1){
+      elog(ERROR, "Unexpected number of results: %d", proc);
+    }
+    tuple = tuptable->vals[0];
+
+    snprintf(name, bufferSize, "%s", SPI_getvalue(tuple, tupdesc, 1));
+  }
+  SPI_finish();
+}
+
+// inspired by https://stackoverflow.com/questions/9210528/split-string-with-delimiters-in-c?answertab=oldest#tab-top
+typedef struct {
+    const char *start;
+    size_t len;
+} token;
+
+char **split(const char *str, char sep)
+{
+    char **array;
+    unsigned int start = 0, stop, toks = 0, t;
+    token *tokens = malloc((strlen(str) + 1) * sizeof(token));
+    for (stop = 0; str[stop]; stop++) {
+        if (str[stop] == sep) {
+            tokens[toks].start = str + start;
+            tokens[toks].len = stop - start;
+            toks++;
+            start = stop + 1;
+        }
+    }
+    /* Mop up the last token */
+    tokens[toks].start = str + start;
+    tokens[toks].len = stop - start;
+    toks++;
+    array = malloc((toks + 1) * sizeof(char*));
+    for (t = 0; t < toks; t++) {
+        /* Calloc makes it nul-terminated */
+        char *token = calloc(tokens[t].len + 1, 1);
+        memcpy(token, tokens[t].start, tokens[t].len);
+        array[t] = token;
+    }
+    /* Add a sentinel */
+    array[t] = NULL;
+    free(tokens);
+    return array;
 }

@@ -9,7 +9,13 @@ typedef struct TopKEntry{
   float distance;
 }TopKEntry;
 
+typedef struct TopKWordEntry{
+  char* word;
+  float distance;
+}TopKWordEntry;
+
 typedef TopKEntry* TopK;
+typedef TopKWordEntry* TopKCplx;
 
 typedef struct CoarseQuantizerEntry{
     int id;
@@ -33,11 +39,17 @@ typedef struct Blacklist{
   struct Blacklist* next;
 } Blacklist;
 
+typedef enum {ORIGINAL, NORMALIZED, PQ_QUANTIZATION, CODEBOOK, RESIDUAL_QUANTIZATION, COARSE_QUANTIZATION, RESIDUAL_CODBOOK} tableType;
+
 typedef CodebookEntry* Codebook;
 
 typedef CoarseQuantizerEntry* CoarseQuantizer;
 
 void updateTopK(TopK tk, float distance, int id, int k, int maxDist, int bestPos);
+
+void updateTopKCplx(TopKCplx tk, float distance, char**, int k, int maxDist, int bestPos);
+
+void updateTopKWordEntry(char** term, char* word);
 
 bool inBlacklist(int id, Blacklist* bl);
 
@@ -58,5 +70,9 @@ WordVectors getVectors(char* tableName, int* ids, int idsSize);
 void freeWordVectors(WordVectors vectors, int size);
 
 void getArray(ArrayType* input, Datum** result, int* n);
+
+void getTableName(tableType type, char* name, int bufferSize);
+
+char **split(const char *str, char sep);
 
 #endif /*INDEX_UTILS_H*/
