@@ -224,7 +224,77 @@ Codebook getCodebook(int* positions, int* codesize, char* tableName){
   return result;
 }
 
+CodebookWithCounts getCodebookWithCounts(int* positions, int* codesize, char* tableName){
+  char command[50];
+  int ret;
+  int proc;
+  CodebookWithCounts result;
+  SPI_connect();
+  sprintf(command, "SELECT * FROM %s", tableName);
+
+  ret = SPI_exec(command, 0);
+  proc = SPI_processed;
+  result = malloc(proc * sizeof(CodebookEntryComplete));
+  if (ret > 0 && SPI_tuptable != NULL){
+    TupleDesc tupdesc = SPI_tuptable->tupdesc;
+    SPITupleTable *tuptable = SPI_tuptable;
+    int i;
+    for (i = 0; i < proc; i++){
+
+      Datum pos;
+      Datum code;
+      Datum vector;
+      Datum* data;
+      Datum count;
+
+      Oid eltype;
+      int16 typlen;
+      bool typbyval;
+      char typalign;
+      bool *nulls;
+      int n = 0;
+
+      ArrayType* vectorAt;
+
+      bool info;
+      HeapTuple tuple = tuptable->vals[i];
+      pos = SPI_getbinval(tuple, tupdesc, 2, &info);
+      code = SPI_getbinval(tuple, tupdesc, 3, &info);
+      vector = SPI_getbinval(tuple, tupdesc, 4, &info);
+      count = SPI_getbinval(tuple, tupdesc, 5, &info);
+      vectorAt = DatumGetArrayTypeP(vector);
+      eltype = ARR_ELEMTYPE(vectorAt);
+      get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
+      deconstruct_array(vectorAt, eltype, typlen, typbyval, typalign, &data, &nulls, &n);
+
+      (*positions) = fmax((*positions), pos);
+      (*codesize) = fmax((*codesize), code);
+
+      result[i].pos = DatumGetInt32(pos);
+      result[i].code = DatumGetInt32(code);
+      result[i].vector = malloc(n*sizeof(float));
+      for (int j=0; j< n; j++){
+        result[i].vector[j] = DatumGetFloat4(data[j]);
+      }
+      result[i].count = DatumGetInt32(count);
+    }
+    SPI_finish();
+  }
+
+  *positions += 1;
+  *codesize += 1;
+
+  return result;
+}
+
 void freeCodebook(Codebook cb, int size){
+  for (int i = 0; i < size; i++){
+    free(cb[i].vector);
+  }
+  free(cb);
+}
+
+void freeCodebookWithCounts(CodebookWithCounts cb, int size){
   for (int i = 0; i < size; i++){
     free(cb[i].vector);
   }

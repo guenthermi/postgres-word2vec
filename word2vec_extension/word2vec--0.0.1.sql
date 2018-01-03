@@ -63,7 +63,9 @@ CREATE OR REPLACE FUNCTION pq_search_in_cplx(anyarray, integer, varchar(100)[]) 
 AS '$libdir/word2vec', 'pq_search_in_cplx'
 LANGUAGE C IMMUTABLE STRICT;
 
-
+CREATE OR REPLACE FUNCTION insert_batch(varchar(100)[]) RETURNS integer
+AS '$libdir/word2vec', 'insert_batch'
+LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION centroid(anyarray) RETURNS anyarray
 AS '$libdir/word2vec', 'centroid'

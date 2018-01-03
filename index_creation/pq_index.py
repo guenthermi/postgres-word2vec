@@ -23,7 +23,7 @@ CODEBOOK_TABLE_NAME = 'pq_codebook'
 PQ_INDEX_NAME = 'pq_quantization_word_idx'
 
 TABLE_INFORMATION = ((PQ_TABLE_NAME,"(id serial PRIMARY KEY, word varchar(100), vector int[])"),
-    (CODEBOOK_TABLE_NAME, "(id serial PRIMARY KEY, pos int, code int, vector float4[])"))
+    (CODEBOOK_TABLE_NAME, "(id serial PRIMARY KEY, pos int, code int, vector float4[], count int)"))
 
 VEC_FILE_PATH = '../vectors/google_vecs.txt'
 
@@ -108,15 +108,15 @@ def create_index(vectors, codebook):
             print('append', count, 'vectors')
     return result
 
-def add_to_database(words, codebook, pq_quantization, con, cur):
+def add_to_database(words, codebook, pq_quantization, counts, con, cur):
     print('len words', len(words), 'len pq_quantization', len(pq_quantization))
     # add codebook
     for pos in range(len(codebook)):
         values = []
         for i in range(len(codebook[pos])):
             output_vec = utils.serialize_vector(codebook[pos][i])
-            values.append({"pos": pos, "code": i, "vector": output_vec})
-        cur.executemany("INSERT INTO "+ CODEBOOK_TABLE_NAME + " (pos,code,vector) VALUES (%(pos)s, %(code)s, %(vector)s)", tuple(values))
+            values.append({"pos": pos, "code": i, "vector": output_vec, "count": counts[(pos, i)]})
+        cur.executemany("INSERT INTO "+ CODEBOOK_TABLE_NAME + " (pos,code,vector, count) VALUES (%(pos)s, %(code)s, %(vector)s, %(count)s)", tuple(values))
         con.commit()
 
     # add pq qunatization
@@ -131,6 +131,18 @@ def add_to_database(words, codebook, pq_quantization, con, cur):
             values = []
     return
 
+def determine_counts(codebook, pq_quantization):
+    result = dict()
+    for i in range(len(pq_quantization)):
+        for j in range(len(pq_quantization[i])):
+            pos = j
+            code = pq_quantization[i][j]
+            if not (pos, code) in result:
+                result[(pos, code)] = 1
+            else:
+                result[(pos, code)] += 1
+    return result
+
 def main(argc, argv):
     train_size = 10000
     # 1) get vectors
@@ -143,6 +155,9 @@ def main(argc, argv):
     index = create_index_with_faiss(vectors[:vectors_size], codebook)
     end = time.time()
     print('finish index creation after', end - start, 'seconds')
+
+    counts = determine_counts(codebook, index)
+
     # create db connection
     try:
         con = psycopg2.connect("dbname='" + STD_DB_NAME + "' user='" + STD_USER + "' host='" + STD_HOST + "' password='" + STD_PASSWORD + "'")
@@ -151,7 +166,7 @@ def main(argc, argv):
         return
     cur = con.cursor()
     utils.init_tables(con, cur, TABLE_INFORMATION)
-    add_to_database(words, codebook, index, con, cur)
+    add_to_database(words, codebook, index, counts, con, cur)
 
     utils.create_index(PQ_TABLE_NAME, PQ_INDEX_NAME, 'word', con, cur)
 

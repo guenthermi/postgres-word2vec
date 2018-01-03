@@ -28,6 +28,13 @@ typedef struct CodebookEntry{
   float* vector;
 } CodebookEntry;
 
+typedef struct CodebookEntryComplete{
+  int pos;
+  int code;
+  float* vector;
+  int count;
+} CodebookEntryComplete;
+
 typedef struct WordVectors{
   int* ids;
   float** vectors;
@@ -42,6 +49,8 @@ typedef struct Blacklist{
 typedef enum {ORIGINAL, NORMALIZED, PQ_QUANTIZATION, CODEBOOK, RESIDUAL_QUANTIZATION, COARSE_QUANTIZATION, RESIDUAL_CODBOOK} tableType;
 
 typedef CodebookEntry* Codebook;
+
+typedef CodebookEntryComplete* CodebookWithCounts;
 
 typedef CoarseQuantizerEntry* CoarseQuantizer;
 
@@ -63,7 +72,11 @@ CoarseQuantizer getCoarseQuantizer(int* size);
 
 Codebook getCodebook(int* positions, int* codesize, char* tableName);
 
+CodebookWithCounts getCodebookWithCounts(int* positions, int* codesize, char* tableName);
+
 void freeCodebook(Codebook cb, int size);
+
+void freeCodebookWithCounts(CodebookWithCounts cb, int size);
 
 WordVectors getVectors(char* tableName, int* ids, int idsSize);
 
