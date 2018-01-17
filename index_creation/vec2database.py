@@ -21,26 +21,18 @@ VEC_FILE_PATH = '../vectors/google_vecs.txt'
 NORMALIZED = True
 
 def init_tables(con, cur):
-    # check if table already exists
-    query_check_existence = "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name=%s;"
-    cur.execute(cur.mogrify(query_check_existence, (VEC_TABLE_NAME,)))
-    rows = cur.fetchall()
-    print(rows)
-    table_exists = (len(rows) > 0)
+    # drop old table
+    query_clear = "DROP TABLE IF EXISTS " + VEC_TABLE_NAME + ";"
+    result = cur.execute(query_clear)
+    con.commit()
+    print('Exexuted DROP TABLE on ', VEC_TABLE_NAME)
 
     # create table
-    if not table_exists:
-        query_create_table = "CREATE TABLE " + VEC_TABLE_NAME + " (id serial PRIMARY KEY, word varchar(100), vector float4[]);"
-        result = cur.execute(cur.mogrify(query_create_table, (VEC_TABLE_NAME,)))
-        # commit changes
-        con.commit()
-        print('Created new table', VEC_TABLE_NAME)
-    else:
-        # delete content of table
-        query_clear = "DELETE FROM " + VEC_TABLE_NAME + ";"
-        result = cur.execute(query_clear)
-        con.commit()
-        print('Table', VEC_TABLE_NAME, 'already exists. All entries are removed.')
+    query_create_table = "CREATE TABLE " + VEC_TABLE_NAME + " (id serial PRIMARY KEY, word varchar(100), vector float4[]);"
+    result = cur.execute(cur.mogrify(query_create_table, (VEC_TABLE_NAME,)))
+    # commit changes
+    con.commit()
+    print('Created new table', VEC_TABLE_NAME)
 
     return
 
@@ -101,15 +93,26 @@ def insert_vectors(filename, con, cur):
     return
 
 def main(argc, argv):
-    if argc < 2:
-        print('Please provide the database name')
-        return
+    global VEC_TABLE_NAME
+    global VEC_INDEX_NAME
+    global NORMALIZED
 
+    if argc < 3:
+        print('Please provide the database name and filename')
+        return
     db_name = argv[1]
+    filename = argv[2]
+
+    if argc > 3:
+        VEC_TABLE_NAME = argv[3]
+    if argc > 4:
+        VEC_INDEX_NAME = argv[4]
+    if argc > 5:
+        NORMALIZED = (int(argv[5]) == 1)
+
     user = STD_USER
     password = STD_PASSWORD
     host = STD_HOST
-
     # init db connection
     try:
         con = psycopg2.connect("dbname='" + db_name + "' user='" + user + "' host='" + host + "' password='" + password + "'")
@@ -121,7 +124,7 @@ def main(argc, argv):
 
     init_tables(con, cur)
 
-    insert_vectors(VEC_FILE_PATH, con, cur)
+    insert_vectors(filename, con, cur)
 
     # commit changes
     con.commit()

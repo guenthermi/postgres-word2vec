@@ -22,10 +22,12 @@ CODEBOOK_TABLE_NAME = 'pq_codebook'
 
 PQ_INDEX_NAME = 'pq_quantization_word_idx'
 
-TABLE_INFORMATION = ((PQ_TABLE_NAME,"(id serial PRIMARY KEY, word varchar(100), vector int[])"),
-    (CODEBOOK_TABLE_NAME, "(id serial PRIMARY KEY, pos int, code int, vector float4[], count int)"))
-
 VEC_FILE_PATH = '../vectors/google_vecs.txt'
+
+def get_table_information():
+    return ((PQ_TABLE_NAME,"(id serial PRIMARY KEY, word varchar(100), vector int[])"),
+        (CODEBOOK_TABLE_NAME, "(id serial PRIMARY KEY, pos int, code int, vector float4[], count int)"))
+
 
 def create_quantizer(vectors, m, centr_num, iterts=10):
     if len(vectors[0]) % m != 0:
@@ -123,7 +125,7 @@ def add_to_database(words, codebook, pq_quantization, counts, con, cur):
     values = []
     for i in range(len(pq_quantization)):
         output_vec = utils.serialize_vector(pq_quantization[i])
-        values.append({"word": words[i], "vector": output_vec})
+        values.append({"word": words[i][:100], "vector": output_vec})
         if (i % (BATCH_SIZE-1) == 0) or (i == (len(pq_quantization)-1)):
             cur.executemany("INSERT INTO "+ PQ_TABLE_NAME + " (word,vector) VALUES (%(word)s, %(vector)s)", tuple(values))
             con.commit()
@@ -144,12 +146,27 @@ def determine_counts(codebook, pq_quantization):
     return result
 
 def main(argc, argv):
+    global VEC_FILE_PATH, PQ_TABLE_NAME, CODEBOOK_TABLE_NAME, PQ_INDEX_NAME
+    m = 12
+    k = 256
     train_size = 10000
+    if argc > 1:
+        VEC_FILE_PATH = argv[1]
+    if argc > 3:
+        PQ_TABLE_NAME = argv[2]
+        CODEBOOK_TABLE_NAME = argv[3]
+    if argc > 4:
+        PQ_INDEX_NAME = argv[4]
+    if argc > 5:
+        m = int(argv[5])
+    if argc > 6:
+        k = int(argv[6])
+    print("m", m)
     # 1) get vectors
     words, vectors, vectors_size = utils.get_vectors(VEC_FILE_PATH)
     print(vectors_size)
     # apply k-means -> get codebook
-    codebook = create_quantizer(vectors[:train_size], 12, 256)
+    codebook = create_quantizer(vectors[:train_size], m, k)
     # 5) create index with qunatizer
     start = time.time()
     index = create_index_with_faiss(vectors[:vectors_size], codebook)
@@ -165,7 +182,7 @@ def main(argc, argv):
         print('Can not connect to database')
         return
     cur = con.cursor()
-    utils.init_tables(con, cur, TABLE_INFORMATION)
+    utils.init_tables(con, cur, get_table_information())
     add_to_database(words, codebook, index, counts, con, cur)
 
     utils.create_index(PQ_TABLE_NAME, PQ_INDEX_NAME, 'word', con, cur)

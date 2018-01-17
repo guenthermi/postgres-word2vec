@@ -12,6 +12,7 @@ CODEBOOK_TABLE_NAME = 'pq_codebook'
 def get_vectors(filename, max_count=10**9, normalization=True):
     f = open(filename)
     line_splits = f.readline().split()
+    print(line_splits)
     size = int(line_splits[0])
     d = int(line_splits[1])
     words, vectors, count = [],np.zeros((size, d)).astype('float32'), 0
@@ -27,7 +28,7 @@ def get_vectors(filename, max_count=10**9, normalization=True):
         if normalization:
             v_len = np.linalg.norm(vector)
             vector = [x / v_len for x in vector]
-        if len(vector) == 300:
+        if len(vector) == d:
             vectors[count] = vector
             words.append(word)
             count += 1
@@ -41,7 +42,7 @@ def init_tables(con, cur, table_information):
     query_drop = "DROP TABLE IF EXISTS "
     for (name, schema) in table_information:
         query_drop += (" " + name + ",")
-    query_drop = query_drop[:-1] + ";"
+    query_drop = query_drop[:-1] + " CASCADE;"
     result = cur.execute(query_drop)
     # commit drop
     con.commit()
@@ -60,6 +61,10 @@ def serialize_vector(vec):
     return output_vec[:-1] + '}'
 
 def create_index(table_name, index_name, column_name, con, cur):
+    query_drop = "DROP INDEX IF EXISTS " + index_name + ";"
+    result = cur.execute(query_drop)
+    con.commit()
     query_create_index = "CREATE INDEX " + index_name + " ON " +  table_name + " (" + column_name + ");"
     cur.execute(query_create_index)
     con.commit()
+    print('Created index', index_name, 'on table', table_name, 'for column', column_name)
