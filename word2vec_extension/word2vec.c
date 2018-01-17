@@ -71,6 +71,7 @@ pq_search(PG_FUNCTION_ARGS)
      int cbCodes = 0;
      float* queryVector;
      int k;
+     int subvectorSize;
 
      float* querySimilarities;
 
@@ -87,10 +88,10 @@ pq_search(PG_FUNCTION_ARGS)
      TopK topK;
      float maxDist;
 
-     start = clock();
-
      char* pqQuantizationTable = palloc(sizeof(char)*100);
      char* pqCodebookTable = palloc(sizeof(char)*100);
+
+     start = clock();
 
      getTableName(PQ_QUANTIZATION, pqQuantizationTable, 100);
      getTableName(CODEBOOK, pqCodebookTable, 100);
@@ -114,13 +115,15 @@ pq_search(PG_FUNCTION_ARGS)
       queryVector[j] = DatumGetFloat4(queryData[j]);
     }
 
+    subvectorSize = n / cbPositions;
+
     // determine similarities of codebook entries to query vector
     querySimilarities = palloc(cbPositions*cbCodes*sizeof(float));
     for (int i=0; i< cbPositions*cbCodes; i++){
         int pos = cb[i].pos;
         int code = cb[i].code;
         float* vector = cb[i].vector;
-        querySimilarities[pos*cbCodes + code] = squareDistance(queryVector+(pos*25), vector, 25);
+        querySimilarities[pos*cbCodes + code] = squareDistance(queryVector+(pos*subvectorSize), vector, subvectorSize);
     }
 
     end = clock();
@@ -246,6 +249,7 @@ ivfadc_search(PG_FUNCTION_ARGS)
     Codebook residualCb;
     int cbPositions = 0;
     int cbCodes = 0;
+    int subvectorSize;
 
     CoarseQuantizer cq;
     int cqSize;
@@ -276,11 +280,11 @@ ivfadc_search(PG_FUNCTION_ARGS)
     int foundInstances;
     Blacklist bl;
 
-    start = clock();
-
     char* tableName = palloc(sizeof(char)*100);
     char* tableNameResidualCodebook = palloc(sizeof(char)*100);
     char* tableNameFineQuantization = palloc(sizeof(char)*100);
+
+    start = clock();
 
     getTableName(NORMALIZED, tableName, 100);
     getTableName(RESIDUAL_CODBOOK, tableNameResidualCodebook, 100);
@@ -308,6 +312,8 @@ ivfadc_search(PG_FUNCTION_ARGS)
    for (int j=0; j< queryDim; j++){
      queryVector[j] = DatumGetFloat4(queryData[j]);
    }
+
+   subvectorSize = n / cbPositions;
 
    foundInstances = 0;
    bl.isValid = false;
@@ -362,7 +368,7 @@ ivfadc_search(PG_FUNCTION_ARGS)
          int pos = residualCb[i].pos;
          int code = residualCb[i].code;
          float* vector = residualCb[i].vector;
-         querySimilarities[pos*cbCodes + code] = squareDistance(residualVector+(pos*25), vector, 25);
+         querySimilarities[pos*cbCodes + code] = squareDistance(residualVector+(pos*subvectorSize), vector, subvectorSize);
      }
 
      end = clock();
@@ -478,6 +484,7 @@ pq_search_in(PG_FUNCTION_ARGS)
 
     Datum* queryData;
     float* queryVector;
+    int queryVectorSize;
 
     Datum* idsData;
     int* inputIds;
@@ -488,6 +495,7 @@ pq_search_in(PG_FUNCTION_ARGS)
     Codebook cb;
     int cbPositions = 0;
     int cbCodes = 0;
+    int subvectorSize;
 
     float* querySimilarities;
     TopK topK;
@@ -520,6 +528,7 @@ pq_search_in(PG_FUNCTION_ARGS)
     for (int j=0; j< n; j++){
       queryVector[j] = DatumGetFloat4(queryData[j]);
     }
+    queryVectorSize = n;
 
     // read ids from function args
     getArray(PG_GETARG_ARRAYTYPE_P(2), &idsData, &n);
@@ -532,13 +541,15 @@ pq_search_in(PG_FUNCTION_ARGS)
     // get pq codebook
     cb = getCodebook(&cbPositions, &cbCodes, tableNameCodebook);
 
+    subvectorSize = queryVectorSize / cbPositions;
+
     // determine similarities of codebook entries to query vector
     querySimilarities = palloc(cbPositions*cbCodes*sizeof(float));
     for (int i=0; i< cbPositions*cbCodes; i++){
       int pos = cb[i].pos;
       int code = cb[i].code;
       float* vector = cb[i].vector;
-      querySimilarities[pos*cbCodes + code] = squareDistance(queryVector+(pos*25), vector, 25);
+      querySimilarities[pos*cbCodes + code] = squareDistance(queryVector+(pos*subvectorSize), vector, subvectorSize);
     }
 
     // calculate TopK by summing up squared distanced sum method
@@ -663,6 +674,7 @@ pq_search_in_cplx(PG_FUNCTION_ARGS)
 
     Datum* queryData;
     float* queryVector;
+    int queryVectorSize;
 
     Datum* termsData;
     char*** inputTerms;
@@ -674,6 +686,7 @@ pq_search_in_cplx(PG_FUNCTION_ARGS)
     Codebook cb;
     int cbPositions = 0;
     int cbCodes = 0;
+    int subvectorSize;
 
     float* querySimilarities;
     TopKCplx topK;
@@ -709,6 +722,7 @@ pq_search_in_cplx(PG_FUNCTION_ARGS)
     for (int j=0; j< n; j++){
       queryVector[j] = DatumGetFloat4(queryData[j]);
     }
+    queryVectorSize = n;
 
     // read string array and transform it to 2-dimensional# token array
     getArray(PG_GETARG_ARRAYTYPE_P(2), &termsData, &n);
@@ -725,13 +739,15 @@ pq_search_in_cplx(PG_FUNCTION_ARGS)
     // get pq codebook
     cb = getCodebook(&cbPositions, &cbCodes, tableNameCodebook);
 
+    subvectorSize = queryVectorSize / cbPositions;
+
     // determine similarities of codebook entries to query vector
     querySimilarities = palloc(cbPositions*cbCodes*sizeof(float));
     for (int i=0; i< cbPositions*cbCodes; i++){
       int pos = cb[i].pos;
       int code = cb[i].code;
       float* vector = cb[i].vector;
-      querySimilarities[pos*cbCodes + code] = squareDistance(queryVector+(pos*25), vector, 25);
+      querySimilarities[pos*cbCodes + code] = squareDistance(queryVector+(pos*subvectorSize), vector, subvectorSize);
     }
 
     // get codes for all entries with an id in inputTerms -> SQL Query
@@ -868,6 +884,7 @@ cluster_pq(PG_FUNCTION_ARGS)
   TupleTableSlot  *slot;
   AttInMetadata   *attinmeta;
   UsrFctxCluster *usrfctx;
+  int vectorSize = 300; // TODO change this
 
   const int DATASET_SIZE = 3000000; // TODO get this dynamically
 
@@ -892,6 +909,7 @@ cluster_pq(PG_FUNCTION_ARGS)
     Codebook cb;
     int cbPositions = 0;
     int cbCodes = 0;
+    int subvectorSize;
 
     // data structure for relation id -> nearest centroid
     int* nearestCentroid;
@@ -943,6 +961,8 @@ cluster_pq(PG_FUNCTION_ARGS)
     // get pq codebook
     cb = getCodebook(&cbPositions, &cbCodes, tableNameCodebook);
 
+    subvectorSize = vectorSize / cbPositions;
+
     // choose initial km-centroid randomly
     kmCentroidIds = palloc(sizeof(int)*k);
     shuffle(inputIds, kmCentroidIds, inputIdsSize, k);
@@ -956,7 +976,7 @@ cluster_pq(PG_FUNCTION_ARGS)
 
     kmCentroidsNew = palloc(sizeof(float*)*k);
     for (int i = 0; i < k; i++){
-      kmCentroidsNew[i] = palloc(sizeof(float)*300);
+      kmCentroidsNew[i] = palloc(sizeof(float)*vectorSize);
     }
 
 
@@ -970,7 +990,7 @@ cluster_pq(PG_FUNCTION_ARGS)
 
       // init kmCentroidsNew
       for (int i=0; i<k;i++){
-        for (int j = 0; j < 300; j++){
+        for (int j = 0; j < vectorSize; j++){
           kmCentroidsNew[i][j] = 0;
         }
       }
@@ -984,7 +1004,7 @@ cluster_pq(PG_FUNCTION_ARGS)
           int pos = cb[i].pos;
           int code = cb[i].code;
           float* vector = cb[i].vector;
-          querySimilarities[cs][pos*cbCodes + code] = squareDistance(kmCentroids[cs]+(pos*25), vector, 25);
+          querySimilarities[cs][pos*cbCodes + code] = squareDistance(kmCentroids[cs]+(pos*subvectorSize), vector, subvectorSize);
         }
       }
 
@@ -1059,7 +1079,7 @@ cluster_pq(PG_FUNCTION_ARGS)
             }
           }
           relationCounts[nearestCentroid[wordId]]++;
-          for (int j = 0; j < 300; j++){
+          for (int j = 0; j < vectorSize; j++){
             kmCentroidsNew[nearestCentroid[wordId]][j] += DatumGetFloat4(dataBigVector[j]);
           }
         }
@@ -1067,7 +1087,7 @@ cluster_pq(PG_FUNCTION_ARGS)
       }
       // calculate new km-centroids
       for (int cs = 0; cs < k; cs++){
-        for (int pos = 0; pos < 300; pos++){
+        for (int pos = 0; pos < vectorSize; pos++){
           if (relationCounts[cs] > 0){
             kmCentroids[cs][pos] = kmCentroidsNew[cs][pos] / relationCounts[cs];
           }else{
@@ -1089,7 +1109,7 @@ cluster_pq(PG_FUNCTION_ARGS)
     usrfctx -> k = k;
 
     usrfctx -> values = (char **) palloc (2 * sizeof (char *));
-    usrfctx -> values  [0] = (char*) palloc   ((18 * 300 + 4) * sizeof (char));
+    usrfctx -> values  [0] = (char*) palloc   ((18 * vectorSize + 4) * sizeof (char));
     usrfctx -> values  [1] = (char*) palloc  ((inputIdsSize * 8) * sizeof (char));
     funcctx -> user_fctx = (void *)usrfctx;
     outtertupdesc = CreateTemplateTupleDesc (2 , false);
@@ -1118,8 +1138,8 @@ cluster_pq(PG_FUNCTION_ARGS)
     // construct output values[0] -> cluster vector; values[1] -> id array
     sprintf(usrfctx->values[0], "{ ");
     cursor = usrfctx->values[0] + strlen("{ ");
-    for (int i = 0; i < 300; i++){
-      if (i < 299){
+    for (int i = 0; i < vectorSize; i++){
+      if (i < vectorSize - 1 ){
         cursor += sprintf(cursor, "%f, ", usrfctx->centroids[usrfctx->iter][i]);
       }else{
         sprintf(cursor, "%f}", usrfctx->centroids[usrfctx->iter][i]);
@@ -1157,6 +1177,7 @@ grouping_pq_to_id(PG_FUNCTION_ARGS)
   TupleTableSlot  *slot;
   AttInMetadata   *attinmeta;
   UsrFctxGrouping *usrfctx;
+  int vectorSize = 300;
 
   if (SRF_IS_FIRSTCALL ()){
 
@@ -1187,6 +1208,7 @@ grouping_pq_to_id(PG_FUNCTION_ARGS)
     Codebook cb;
     int cbPositions = 0;
     int cbCodes = 0;
+    int subVectorSize;
 
     int* nearestGroup;
 
@@ -1229,6 +1251,8 @@ grouping_pq_to_id(PG_FUNCTION_ARGS)
     groupVecs = palloc(sizeof(float*)*n);
     groupVecsSize = numelems / n;
 
+    vectorSize = n;
+
     while (nextelem < numelems)
     {
         int offset = nextelem++;
@@ -1245,6 +1269,8 @@ grouping_pq_to_id(PG_FUNCTION_ARGS)
     // get pq codebook
     cb = getCodebook(&cbPositions, &cbCodes, tableNameCodebook);
 
+    subVectorSize = vectorSize / cbPositions;
+
     querySimilarities = palloc(sizeof(float*) * groupVecsSize);
 
     for (int cs = 0; cs < groupVecsSize; cs++){
@@ -1253,7 +1279,7 @@ grouping_pq_to_id(PG_FUNCTION_ARGS)
         int pos = cb[i].pos;
         int code = cb[i].code;
         float* vector = cb[i].vector;
-        querySimilarities[cs][pos*cbCodes + code] = squareDistance(groupVecs[cs]+(pos*25), vector, 25);
+        querySimilarities[cs][pos*cbCodes + code] = squareDistance(groupVecs[cs]+(pos*subVectorSize), vector, subVectorSize);
       }
     }
     // get vectors for group_ids
@@ -1326,7 +1352,7 @@ grouping_pq_to_id(PG_FUNCTION_ARGS)
     usrfctx -> groupsSize = groupVecsSize;
     usrfctx -> values = (char **) palloc (2 * sizeof (char *));
     usrfctx -> values  [0] = (char*) palloc  ((18) * sizeof (char));
-    usrfctx -> values  [1] = (char*) palloc   ((18 * 300 + 4) * sizeof (char));
+    usrfctx -> values  [1] = (char*) palloc   ((18 * vectorSize + 4) * sizeof (char));
     funcctx -> user_fctx = (void *)usrfctx;
     outtertupdesc = CreateTemplateTupleDesc (2 , false);
     TupleDescInitEntry (outtertupdesc,  1, "Ids",    INT4OID, -1, 0);
@@ -1355,7 +1381,7 @@ grouping_pq_to_id(PG_FUNCTION_ARGS)
 
     sprintf(usrfctx->values[1], "{ ");
     cursor = usrfctx->values[1] + strlen("{ ");
-    for (int i = 0; i < 300; i++){
+    for (int i = 0; i < vectorSize; i++){
       cursor += sprintf(cursor, " %f,", usrfctx -> groupVecs[usrfctx->nearestGroup[usrfctx->iter]][i]);
     }
     sprintf(cursor-1, "}");
@@ -1396,10 +1422,14 @@ insert_batch(PG_FUNCTION_ARGS)
   CodebookWithCounts cb;
   int cbPositions = 0;
   int cbCodes = 0;
+  int subvectorSize;
 
   int** nearestCentroids;
   int* countIncs;
   float** differences;
+  float* nearestCentroidRaw;
+
+  float* minDist;
 
 
   char* tableNameCodebook = palloc(sizeof(char)*100);
@@ -1474,11 +1504,11 @@ insert_batch(PG_FUNCTION_ARGS)
   cb = getCodebookWithCounts(&cbPositions, &cbCodes, tableNameCodebook);
   // determine nearest centroids (quantization)
   nearestCentroids = palloc(sizeof(int*)*rawVectorsSize);
-  float* minDist = palloc(sizeof(float)*cbPositions);
+  minDist = palloc(sizeof(float)*cbPositions);
   countIncs = malloc(cbPositions*cbCodes*sizeof(int));
   differences = palloc(cbPositions*cbCodes*sizeof(float*));
-  float* nearestCentroidRaw = NULL;
-  int subvectorSize = vectorSize / cbPositions;
+  nearestCentroidRaw = NULL;
+  subvectorSize = vectorSize / cbPositions;
   for (int i = 0; i < (cbPositions*cbCodes); i++){
     differences[i] = palloc(subvectorSize*sizeof(float));
     for (int j = 0; j < subvectorSize; j++){
@@ -1496,7 +1526,7 @@ insert_batch(PG_FUNCTION_ARGS)
       int pos = cb[j].pos;
       int code = cb[j].code;
       float* vector = cb[j].vector;
-      float dist = squareDistance(rawVectors[i]+(pos*25), vector, 25);
+      float dist = squareDistance(rawVectors[i]+(pos*subvectorSize), vector, subvectorSize);
       if (dist < minDist[pos]){
         nearestCentroids[i][pos] = code;
         minDist[pos] = dist;
