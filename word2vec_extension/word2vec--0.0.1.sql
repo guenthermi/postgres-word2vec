@@ -86,6 +86,21 @@ END
 $$
 LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION k_nearest_neighbour(input_vector anyarray, k integer) RETURNS TABLE (word varchar(100), similarity float8) AS $$
+DECLARE
+table_name varchar;
+BEGIN
+EXECUTE 'SELECT get_vecs_name()' INTO table_name;
+RETURN QUERY EXECUTE format('
+SELECT v2.word, cosine_similarity_norm(''%s''::float4[], v2.vector)
+FROM %s AS v2
+ORDER BY cosine_similarity_norm(''%s''::float4[], v2.vector) DESC
+FETCH FIRST %s ROWS ONLY
+', input_vector, table_name, input_vector, k);
+END
+$$
+LANGUAGE plpgsql;
+
 CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc(term varchar(100), k integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
 DECLARE
 table_name varchar;
@@ -117,6 +132,39 @@ END
 $$
 LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc_pv(term varchar(100), k integer, post_verif integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+DECLARE
+table_name varchar;
+BEGIN
+EXECUTE 'SELECT get_vecs_name()' INTO table_name;
+RETURN QUERY EXECUTE format('
+SELECT v2.word, distance
+FROM %s AS v1, ivfadc_search(v1.vector, %s) AS (idx integer, distance float4)
+INNER JOIN %s AS v2 ON idx = v2.id
+WHERE v1.word = ''%s''
+ORDER BY cosine_similarity(v1.vector, v2.vector) DESC
+FETCH FIRST %s ROWS ONLY
+', table_name, post_verif, table_name, replace(term, '''', ''''''), k);
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc_pv(input_vector anyarray, k integer, post_verif integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+DECLARE
+fine_quantization_name varchar;
+BEGIN
+EXECUTE 'SELECT get_vecs_name_residual_quantization()' INTO fine_quantization_name;
+RETURN QUERY EXECUTE format('
+SELECT fq.word, distance
+FROM ivfadc_search(''%s''::float4[], %s) AS (idx integer, distance float4)
+INNER JOIN %s AS fq ON idx = fq.id
+ORDER BY cosine_similarity(''%s''::float4[], fq.word) DESC
+FETCH FIRST %s ROWS ONLY
+', input_vector, post_verif, fine_quantization_name, input_vector, k);
+END
+$$
+LANGUAGE plpgsql;
+
 CREATE OR REPLACE FUNCTION k_nearest_neighbour_pq(term varchar(100), k integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
 DECLARE
 table_name varchar;
@@ -144,6 +192,23 @@ SELECT pqq.word AS word, distance AS distance
 FROM pq_search(''%s''::float4[], %s) AS (idx integer, distance float4)
 INNER JOIN %s AS pqq ON idx = pqq.id
 ', input_vector, k, pq_quantization_name);
+END
+$$
+LANGUAGE plpgsql;
+
+-- with postverification
+CREATE OR REPLACE FUNCTION k_nearest_neighbour_pq_pv(input_vector anyarray, k integer, post_verif integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+DECLARE
+pq_quantization_name varchar;
+BEGIN
+EXECUTE 'SELECT get_vecs_name_pq_quantization()' INTO pq_quantization_name;
+RETURN QUERY EXECUTE format('
+SELECT pqq.word AS word, distance AS distance
+FROM pq_search(''%s''::float4[], %s) AS (idx integer, distance float4)
+INNER JOIN %s AS pqq ON idx = pqq.id
+ORDER BY cosine_similarity(''%s''::float4[], pqq.word) DESC
+FETCH FIRST %s ROWS ONLY
+', input_vector, post_verif, pq_quantization_name, input_vector, k);
 END
 $$
 LANGUAGE plpgsql;
@@ -236,6 +301,21 @@ SELECT cosine_similarity(t1.vector, t2.vector)
 FROM %s AS t1, %s AS t2
 WHERE (t1.word = ''%s'') AND (t2.word = ''%s'')
 ', table_name, table_name, replace(term1, '''', ''''''), replace(term2, '''', '''''')) INTO result;
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION cosine_similarity(vector float4[], term2 varchar(100), OUT result float8) AS $$
+DECLARE
+table_name varchar;
+BEGIN
+EXECUTE 'SELECT get_vecs_name()' INTO table_name;
+
+EXECUTE format('
+SELECT cosine_similarity(''%s''::float4[], t2.vector)
+FROM %s AS t2
+WHERE t2.word = ''%s''
+', vector, table_name, replace(term2, '''', '''''')) INTO result;
 END
 $$
 LANGUAGE plpgsql;
