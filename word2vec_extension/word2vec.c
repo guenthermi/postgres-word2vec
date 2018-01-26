@@ -354,7 +354,7 @@ ivfadc_search(PG_FUNCTION_ARGS)
        if (inBlacklist(i, &bl)){
          continue;
        }
-       dist = squareDistance(queryVector, cq[i].vector, n);
+       dist = squareDistance(queryVector, cq[i].vector, queryDim);
        if (dist < minDist){
          minDist = dist;
          cqId = i;
@@ -1454,7 +1454,7 @@ insert_batch(PG_FUNCTION_ARGS)
   int cqSize;
   int** nearestResidualCentroids;
   int* residualCountIncs;
-  int minDistCoarse;
+  float minDistCoarse;
 
 
   char* tableNameCodebook = palloc(sizeof(char)*100);
