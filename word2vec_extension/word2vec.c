@@ -147,24 +147,39 @@ pq_search(PG_FUNCTION_ARGS)
     if (ret > 0 && SPI_tuptable != NULL){
       TupleDesc tupdesc = SPI_tuptable->tupdesc;
       SPITupleTable *tuptable = SPI_tuptable;
+
+      Oid i_eltype;
+      int16 i_typlen;
+      bool i_typbyval;
+      char i_typalign;
+      bool *nulls;
+
+      Datum id;
+      Datum vector;
+      Datum* data;
+      int wordId;
+      float distance;
+
+      int code;
+
       int i;
       for (i = 0; i < proc; i++){
-        Datum id;
-        Datum vector;
-        Datum* data;
-        int wordId;
-        float distance;
 
         HeapTuple tuple = tuptable->vals[i];
         id = SPI_getbinval(tuple, tupdesc, 1, &info);
         vector = SPI_getbinval(tuple, tupdesc, 2, &info);
         wordId = DatumGetInt32(id);
 
-        getArray(DatumGetArrayTypeP(vector), &data, &n);
+        if (i == 0){
+        i_eltype = ARR_ELEMTYPE(DatumGetArrayTypeP(vector));
+        get_typlenbyvalalign(i_eltype, &i_typlen, &i_typbyval, &i_typalign);
+        }
+
+        deconstruct_array(DatumGetArrayTypeP(vector), i_eltype, i_typlen, i_typbyval, i_typalign, &data, &nulls, &n);
 
         distance = 0;
         for (int j = 0; j < n; j++){
-          int code = DatumGetInt32(data[j]);
+          code = DatumGetInt32(data[j]);
           distance += querySimilarities[j*cbCodes + code];
         }
         if (distance < maxDist){
@@ -421,6 +436,7 @@ ivfadc_search(PG_FUNCTION_ARGS)
     }
 
     freeCodebook(residualCb,cbPositions * cbCodes);
+    free(cq);
 
     usrfctx = (UsrFctx*) palloc (sizeof (UsrFctx));
     usrfctx -> tk = topK;
@@ -516,7 +532,6 @@ pq_search_in(PG_FUNCTION_ARGS)
     getTableName(PQ_QUANTIZATION, tableNamePqQuantization, 100);
 
 
-
     funcctx = SRF_FIRSTCALL_INIT ();
     oldcontext = MemoryContextSwitchTo (funcctx->multi_call_memory_ctx);
 
@@ -559,10 +574,9 @@ pq_search_in(PG_FUNCTION_ARGS)
       topK[i].distance = 100.0;
       topK[i].id = -1;
     }
-
     // get codes for all entries with an id in inputIds -> SQL Query
     SPI_connect();
-    command = palloc(60* sizeof(char) + inputIdSize*8*sizeof(char));
+    command = palloc(60* sizeof(char) + inputIdSize*10*sizeof(char));
     sprintf(command, "SELECT id, vector FROM %s WHERE id IN (", tableNamePqQuantization);
     // fill command
     cur = command + strlen(command);
@@ -1415,6 +1429,7 @@ insert_batch(PG_FUNCTION_ARGS)
   char* cur;
 
   float** rawVectors;
+  float** rawVectorsUnnormalized;
   int vectorSize = 0;
   char** tokens;
   int rawVectorsSize;
@@ -1426,18 +1441,38 @@ insert_batch(PG_FUNCTION_ARGS)
 
   int** nearestCentroids;
   int* countIncs;
-  float** differences;
-  float* nearestCentroidRaw;
 
-  float* minDist;
+  int* cqQuantizations;
+  float* nearestCoarseCentroidRaw;
+  float** residuals;
+
+  CodebookWithCounts residualCb;
+  int cbrPositions = 0;
+  int cbrCodes = 0;
+  int residualSubvectorSize;
+  CoarseQuantizer cq;
+  int cqSize;
+  int** nearestResidualCentroids;
+  int* residualCountIncs;
+  int minDistCoarse;
 
 
   char* tableNameCodebook = palloc(sizeof(char)*100);
   char* pqQuantizationTable = palloc(sizeof(char)*100);
+  char* tableNameResidualCodebook = palloc(sizeof(char)*100);
+  char* tableNameFineQuantization = palloc(sizeof(char)*100);
+
+  char* tableNameNormalized = palloc(sizeof(char)*100);
+  char* tableNameOriginal = palloc(sizeof(char)*100);
 
   getTableName(CODEBOOK, tableNameCodebook, 100);
   getTableName(PQ_QUANTIZATION, pqQuantizationTable, 100);
 
+  getTableName(RESIDUAL_CODBOOK, tableNameResidualCodebook, 100);
+  getTableName(RESIDUAL_QUANTIZATION, tableNameFineQuantization, 100);
+
+  getTableName(NORMALIZED, tableNameNormalized, 100);
+  getTableName(ORIGINAL, tableNameOriginal, 100);
 
   // get terms from arguments
   getArray(PG_GETARG_ARRAYTYPE_P(0), &termsData, &n);
@@ -1454,7 +1489,7 @@ insert_batch(PG_FUNCTION_ARGS)
   // determine tokenization
   command = palloc(sizeof(char)*inputTermsPlaneSize*3 + 100);
   cur = command;
-  cur += sprintf(cur, "SELECT replace(term, ' ', '_') AS token, tokenize(term) FROM unnest('{");
+  cur += sprintf(cur, "SELECT replace(term, ' ', '_') AS token, tokenize(term), tokenize_raw(term) FROM unnest('{");
   for (int i=0; i < inputTermsSize; i++){
     if (i < (inputTermsSize-1)){
       cur += sprintf(cur, "%s, ", inputTerms[i]);
@@ -1468,146 +1503,114 @@ insert_batch(PG_FUNCTION_ARGS)
   proc = SPI_processed;
   rawVectorsSize = proc;
   rawVectors = malloc(sizeof(float*)*proc);
+  rawVectorsUnnormalized = malloc(sizeof(float*)*proc);
   tokens = malloc(sizeof(char*)*proc);
   if (ret > 0 && SPI_tuptable != NULL){
     TupleDesc tupdesc = SPI_tuptable->tupdesc;
     SPITupleTable *tuptable = SPI_tuptable;
     for (int i = 0; i < proc; i++){
       Datum vector;
+      Datum vectorUnnormalized;
       char* token;
 
       Datum* dataVector;
+      Datum* dataVectorUnnormlized;
 
       HeapTuple tuple = tuptable->vals[i];
 
       token = SPI_getvalue(tuple, tupdesc, 1);
       vector = SPI_getbinval(tuple, tupdesc, 2, &info);
+      vectorUnnormalized = SPI_getbinval(tuple, tupdesc, 3, &info);
       tokens[i] = malloc(sizeof(char)* 100); // maybe replace with strlen(token)+1 when using TEXT data type
 
       snprintf(tokens[i], strlen(token)+1, "%s", token);
-
       getArray(DatumGetArrayTypeP(vector), &dataVector, &n);
+      getArray(DatumGetArrayTypeP(vectorUnnormalized), &dataVectorUnnormlized, &n);
       vectorSize = n;
       rawVectors[i] = malloc(sizeof(float)*vectorSize);
+      rawVectorsUnnormalized[i] = malloc(sizeof(float)*vectorSize);
       for (int j= 0; j < vectorSize; j++){
         rawVectors[i][j] = DatumGetFloat4(dataVector[j]);
+        rawVectorsUnnormalized[i][j] = DatumGetFloat4(dataVectorUnnormlized[j]);
       }
     }
     SPI_finish();
   }
   pfree(command);
-  SPI_connect();
 
   // determine quantization and count increments
 
   // get pq codebook
   cb = getCodebookWithCounts(&cbPositions, &cbCodes, tableNameCodebook);
-  // determine nearest centroids (quantization)
-  nearestCentroids = palloc(sizeof(int*)*rawVectorsSize);
-  minDist = palloc(sizeof(float)*cbPositions);
-  countIncs = malloc(cbPositions*cbCodes*sizeof(int));
-  differences = palloc(cbPositions*cbCodes*sizeof(float*));
-  nearestCentroidRaw = NULL;
-  subvectorSize = vectorSize / cbPositions;
-  for (int i = 0; i < (cbPositions*cbCodes); i++){
-    differences[i] = palloc(subvectorSize*sizeof(float));
-    for (int j = 0; j < subvectorSize; j++){
-      differences[i][j] = 0;
-      countIncs[i] = 0;
-    }
-  }
+
+  // get residual codebook
+  residualCb = getCodebookWithCounts(&cbrPositions, &cbrCodes, tableNameResidualCodebook);
+
+  // get coarse quantizer
+  cq = getCoarseQuantizer(&cqSize);
+
+  // determine coarse quantization and residuals
+  cqQuantizations = palloc(sizeof(int)*rawVectorsSize);
+  nearestCoarseCentroidRaw = NULL;
+  residuals = malloc(sizeof(float*)*rawVectorsSize);
 
   for (int i = 0; i < rawVectorsSize; i++){
-    nearestCentroids[i] = palloc(sizeof(int)*cbPositions);
-    for (int j=0; j< cbPositions; j++){
-      minDist[j] = 100; // sufficient high value
-    }
-    for (int j=0; j< cbPositions*cbCodes; j++){
-      int pos = cb[j].pos;
-      int code = cb[j].code;
-      float* vector = cb[j].vector;
-      float dist = squareDistance(rawVectors[i]+(pos*subvectorSize), vector, subvectorSize);
-      if (dist < minDist[pos]){
-        nearestCentroids[i][pos] = code;
-        minDist[pos] = dist;
-        nearestCentroidRaw = vector;
+    minDistCoarse = 100;
+    for (int j = 0; j < cqSize; j++){
+      float dist = squareDistance(rawVectors[i], cq[j].vector, vectorSize);
+      if (dist < minDistCoarse){
+        cqQuantizations[i] = cq[j].id;
+        nearestCoarseCentroidRaw = cq[j].vector;
+        minDistCoarse = dist;
       }
     }
-    for (int j=0; j< cbPositions; j++){
-      int code = nearestCentroids[i][j];
-      countIncs[j*cbCodes + code] += 1;
-      for (int k=0; k < subvectorSize; k++){
-        differences[j*cbCodes + code][k] += nearestCentroidRaw[k];
-      }
+    residuals[i] = malloc(sizeof(float)*vectorSize);
+    for (int j = 0; j < vectorSize; j++){
+      residuals[i][j] = rawVectors[i][j] - nearestCoarseCentroidRaw[j];
     }
   }
 
-  // recalculate codebook
-  for (int i = 0; i < cbPositions*cbCodes; i++){
-    cb[i].count += countIncs[cb[i].pos*cbCodes + cb[i].code];
-    for (int j=0; j < subvectorSize; j++){
-        cb[i].vector[j] += (1.0 / cb[i].count) * differences[cb[i].pos + cb[i].code][j];
-    }
-  }
+  // determine nearest centroids (quantization)
+  nearestCentroids = palloc(sizeof(int*)*rawVectorsSize);
+  countIncs = malloc(cbPositions*cbCodes*sizeof(int));
+  subvectorSize = vectorSize / cbPositions;
+
+  updateCodebook(rawVectors, rawVectorsSize, subvectorSize, cb, cbPositions, cbCodes, nearestCentroids, countIncs);
+
+  nearestResidualCentroids = palloc(sizeof(int*)*rawVectorsSize);
+  residualSubvectorSize = vectorSize / cbrPositions;
+  residualCountIncs = malloc(cbrPositions*cbrCodes*sizeof(int));
+  updateCodebook(residuals, rawVectorsSize, residualSubvectorSize, residualCb, cbrPositions, cbrCodes, nearestResidualCentroids, residualCountIncs);
 
   // insert new terms + quantinzation
-  for (int i=0; i < rawVectorsSize; i++){
-    command = palloc(sizeof(char)*(100 + cbPositions*6 + 100));
-    cur = command;
-    cur += sprintf(cur, "INSERT INTO %s (word, vector) VALUES (", pqQuantizationTable);
-    cur += sprintf(cur, "'%s', '{", tokens[i]);
-    for (int j = 0; j < cbPositions; j++){
-      if (j < (cbPositions - 1)){
-        cur += sprintf(cur, "%d,", nearestCentroids[i][j]);
-      }else{
-        cur += sprintf(cur, "%d", nearestCentroids[i][j]);
-      }
-    }
-    cur += sprintf(cur, "}'");
-    cur += sprintf(cur, ")");
-    SPI_connect();
-    ret = SPI_exec(command, 0);
-    if (ret > 0){
-      SPI_finish();
-    }
+  updateProductQuantizationRelation(nearestCentroids, tokens, cbPositions, cb, pqQuantizationTable, rawVectorsSize, NULL);
+  // insert new terms + quantinzation for residuals
+  updateProductQuantizationRelation(nearestResidualCentroids, tokens, cbrPositions, residualCb, tableNameFineQuantization, rawVectorsSize, cqQuantizations);
 
-    pfree(command);
-  }
+  // update codebook relation
+  updateCodebookRelation(cb, cbPositions, cbCodes, tableNameCodebook, countIncs, subvectorSize);
+  // update residual codebook relation
+  updateCodebookRelation(residualCb, cbrPositions, cbrCodes, tableNameResidualCodebook, residualCountIncs, residualSubvectorSize);
 
-  // update codebook
-  for (int i=0; i < cbPositions*cbCodes; i++){
-    if (countIncs[cb[i].pos*cbCodes + cb[i].code] > 0){
-      // update codebook entry
-      command = palloc(sizeof(char)*(subvectorSize*16+6+6+100));
-      cur = command;
-      cur += sprintf(cur, "UPDATE %s SET (vector, count) = ('{", tableNameCodebook);
-      for (int j = 0; j < subvectorSize; j++){
-        if (j < subvectorSize-1){
-          cur += sprintf(cur, "%f, ", cb[i].vector[j]);
-        }else{
-          cur += sprintf(cur, "%f", cb[i].vector[j]);
-        }
-      }
-      cur += sprintf(cur, "}', '%d')", cb[i].count);
-      cur += sprintf(cur, " WHERE (pos = %d) AND (code = %d)", cb[i].pos, cb[i].code);
-      SPI_connect();
-      ret = SPI_exec(command, 0);
-      if (ret > 0){
-        SPI_finish();
-      }
-      pfree(command);
-    }
-  }
+  updateWordVectorsRelation(tableNameNormalized, tokens, rawVectors, rawVectorsSize, vectorSize);
+  updateWordVectorsRelation(tableNameOriginal, tokens, rawVectorsUnnormalized, rawVectorsSize, vectorSize);
 
   for (int i = 0; i < rawVectorsSize; i++){
       free(rawVectors[i]);
+      free(rawVectorsUnnormalized[i]);
       free(tokens[i]);
+      free(residuals[i]);
   }
   free(rawVectors);
+  free(rawVectorsUnnormalized);
   free(tokens);
   free(countIncs);
   freeCodebookWithCounts(cb,cbPositions*cbCodes);
 
+  freeCodebookWithCounts(residualCb, cbrPositions*cbrCodes);
+  free(cq);
+  free(residualCountIncs);
+  free(residuals);
 
   PG_RETURN_INT32(0);
 

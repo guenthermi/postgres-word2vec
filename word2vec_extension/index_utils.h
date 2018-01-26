@@ -22,6 +22,7 @@ typedef struct CoarseQuantizerEntry{
     float* vector;
 }CoarseQuantizerEntry;
 
+
 typedef struct CodebookEntry{
   int pos;
   int code;
@@ -87,5 +88,13 @@ void getArray(ArrayType* input, Datum** result, int* n);
 void getTableName(tableType type, char* name, int bufferSize);
 
 char **split(const char *str, char sep);
+
+void updateCodebook(float** rawVectors, int rawVectorsSize, int subvectorSize, CodebookWithCounts cb, int cbPositions, int cbCodes, int** nearestCentroids, int* countIncs);
+
+void updateCodebookRelation(CodebookWithCounts cb, int cbPositions, int cbCodes, char* tableNameCodebook, int* countIncs, int subvectorSize);
+
+void updateProductQuantizationRelation(int** nearestCentroids, char** tokens, int cbPositions, CodebookWithCounts cb, char* pqQuantizationTable, int rawVectorsSize, int* cqQuantizations);
+
+void updateWordVectorsRelation(char* tableName, char** tokens, float** rawVectors, int rawVectorsSize, int vectorSize);
 
 #endif /*INDEX_UTILS_H*/

@@ -458,3 +458,143 @@ char **split(const char *str, char sep)
     free(tokens);
     return array;
 }
+
+void updateCodebook(float** rawVectors, int rawVectorsSize, int subvectorSize, CodebookWithCounts cb, int cbPositions, int cbCodes, int** nearestCentroids, int* countIncs){
+  float* minDist = palloc(sizeof(float)*cbPositions);
+  float** differences = palloc(cbPositions*cbCodes*sizeof(float*));
+  float* nearestCentroidRaw = NULL;
+
+  for (int i = 0; i < (cbPositions*cbCodes); i++){
+    differences[i] = palloc(subvectorSize*sizeof(float));
+    for (int j = 0; j < subvectorSize; j++){
+      differences[i][j] = 0;
+    }
+    countIncs[i] = 0;
+  }
+
+  for (int i = 0; i < rawVectorsSize; i++){
+    nearestCentroids[i] = palloc(sizeof(int)*cbPositions);
+    for (int j=0; j< cbPositions; j++){
+      minDist[j] = 100; // sufficient high value
+    }
+    for (int j=0; j< cbPositions*cbCodes; j++){
+      int pos = cb[j].pos;
+      int code = cb[j].code;
+      float* vector = cb[j].vector;
+      float dist = squareDistance(rawVectors[i]+(pos*subvectorSize), vector, subvectorSize);
+      if (dist < minDist[pos]){
+        nearestCentroids[i][pos] = code;
+        minDist[pos] = dist;
+        nearestCentroidRaw = vector;
+      }
+    }
+    for (int j=0; j< cbPositions; j++){
+      int code = nearestCentroids[i][j];
+      countIncs[j*cbCodes + code] += 1;
+      for (int k=0; k < subvectorSize; k++){
+        differences[j*cbCodes + code][k] += nearestCentroidRaw[k];
+      }
+    }
+  }
+
+  // recalculate codebook
+  for (int i = 0; i < cbPositions*cbCodes; i++){
+    cb[i].count += countIncs[cb[i].pos*cbCodes + cb[i].code];
+    for (int j=0; j < subvectorSize; j++){
+        cb[i].vector[j] += (1.0 / cb[i].count) * differences[cb[i].pos + cb[i].code][j];
+    }
+  }
+}
+
+void updateCodebookRelation(CodebookWithCounts cb, int cbPositions, int cbCodes, char* tableNameCodebook, int* countIncs, int subvectorSize){
+  char* command;
+  char* cur;
+  int ret;
+
+  for (int i=0; i < cbPositions*cbCodes; i++){
+    if (countIncs[cb[i].pos*cbCodes + cb[i].code] > 0){
+      // update codebook entry
+      command = palloc(sizeof(char)*(subvectorSize*16+6+6+100));
+      cur = command;
+      cur += sprintf(cur, "UPDATE %s SET (vector, count) = ('{", tableNameCodebook);
+      for (int j = 0; j < subvectorSize; j++){
+        if (j < subvectorSize-1){
+          cur += sprintf(cur, "%f, ", cb[i].vector[j]);
+        }else{
+          cur += sprintf(cur, "%f", cb[i].vector[j]);
+        }
+      }
+      cur += sprintf(cur, "}', '%d')", cb[i].count);
+      cur += sprintf(cur, " WHERE (pos = %d) AND (code = %d)", cb[i].pos, cb[i].code);
+      SPI_connect();
+      ret = SPI_exec(command, 0);
+      if (ret > 0){
+        SPI_finish();
+      }
+      pfree(command);
+    }
+  }
+}
+void updateProductQuantizationRelation(int** nearestCentroids, char** tokens, int cbPositions, CodebookWithCounts cb, char* pqQuantizationTable, int rawVectorsSize, int* cqQuantizations){
+  char* command;
+  char* cur;
+  int ret;
+  const char* schema_pq_quantization = "(word, vector)";
+  const char* schema_fine_quantization = "(coarse_id, word, vector)";
+
+  for (int i=0; i < rawVectorsSize; i++){
+    command = palloc(sizeof(char)*(100 + cbPositions*6 + 100));
+    cur = command;
+    if (cqQuantizations == NULL){
+      cur += sprintf(cur, "INSERT INTO %s %s VALUES (", pqQuantizationTable, schema_pq_quantization);
+      cur += sprintf(cur, "'%s', '{", tokens[i]);
+    }else{
+      cur += sprintf(cur, "INSERT INTO %s %s VALUES (", pqQuantizationTable, schema_fine_quantization);
+      cur += sprintf(cur, "%d, '%s', '{", cqQuantizations[i], tokens[i]);
+    }
+    for (int j = 0; j < cbPositions; j++){
+      if (j < (cbPositions - 1)){
+        cur += sprintf(cur, "%d,", nearestCentroids[i][j]);
+      }else{
+        cur += sprintf(cur, "%d", nearestCentroids[i][j]);
+      }
+    }
+    cur += sprintf(cur, "}'");
+    cur += sprintf(cur, ")");
+
+    SPI_connect();
+    ret = SPI_exec(command, 0);
+    if (ret > 0){
+      SPI_finish();
+    }
+
+    pfree(command);
+  }
+}
+
+void updateWordVectorsRelation(char* tableName, char** tokens, float** rawVectors, int rawVectorsSize, int vectorSize){
+  char* command;
+  char* cur;
+  int ret;
+  for (int i=0; i < rawVectorsSize; i++){
+    command = palloc(sizeof(char)*(100 + vectorSize*10 + 100));
+    cur = command;
+    cur += sprintf(cur, "INSERT INTO %s (word, vector) VALUES ( '%s', '{", tableName, tokens[i]);
+    for (int j = 0; j < vectorSize; j++){
+      if (j < (vectorSize - 1)){
+        cur += sprintf(cur, "%f,", rawVectors[i][j]);
+      }else{
+        cur += sprintf(cur, "%f", rawVectors[i][j]);
+      }
+    }
+    cur += sprintf(cur, "}'");
+    cur += sprintf(cur, ")");
+    SPI_connect();
+    ret = SPI_exec(command, 0);
+    if (ret > 0){
+      SPI_finish();
+    }
+
+    pfree(command);
+  }
+}
