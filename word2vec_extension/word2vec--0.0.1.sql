@@ -341,6 +341,21 @@ END
 $$
 LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION top_k_in(query_vector float4[], k integer, input_set integer[]) RETURNS TABLE (word varchar(100), similarity float8) AS $$
+DECLARE
+table_name varchar;
+BEGIN
+EXECUTE 'SELECT get_vecs_name()' INTO table_name;
+RETURN QUERY EXECUTE format('
+SELECT v2.word, cosine_similarity_norm(''%s''::float4[], v2.vector) FROM %s AS v2
+WHERE v2.id = ANY (''%s''::integer[])
+ORDER BY cosine_similarity_norm(''%s''::float4[], v2.vector) DESC
+FETCH FIRST %s ROWS ONLY
+', query_vector, table_name, input_set, query_vector, k);
+END
+$$
+LANGUAGE plpgsql;
+
 CREATE OR REPLACE FUNCTION top_k_in(term varchar(100), k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), similarity float8) AS $$
 DECLARE
 table_name varchar;
