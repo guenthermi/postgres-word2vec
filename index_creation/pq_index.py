@@ -149,7 +149,7 @@ def main(argc, argv):
     global VEC_FILE_PATH, PQ_TABLE_NAME, CODEBOOK_TABLE_NAME, PQ_INDEX_NAME
     m = 12
     k = 256
-    train_size = 10000
+    train_size = 100000
     if argc > 1:
         VEC_FILE_PATH = argv[1]
     if argc > 3:

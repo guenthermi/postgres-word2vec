@@ -28,7 +28,7 @@ def get_vectors(filename, max_count=10**9, normalization=True):
         if normalization:
             v_len = np.linalg.norm(vector)
             vector = [x / v_len for x in vector]
-        if len(vector) == d:
+        if (len(vector) == d) and (len(word) < 100):
             vectors[count] = vector
             words.append(word)
             count += 1

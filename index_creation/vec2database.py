@@ -64,6 +64,7 @@ def serialize_as_norm_array(array):
 def insert_vectors(filename, con, cur):
     f = open(filename)
     (_, size) = f.readline().split()
+    d = int(size)
     count = 1
     line = f.readline()
     values = []
@@ -74,12 +75,15 @@ def insert_vectors(filename, con, cur):
             vector = serialize_as_norm_array(splits[1:])
         else:
             vector = serialize_array(splits[1:])
-        if (len(splits[0]) < 100) and (vector != None):
+        if (len(splits[0]) < 100) and (vector != None) and (len(splits) == (d + 1)):
             values.append({"word": splits[0], "vector": vector})
+        else:
+            print('WARNING: parsing problem with ', line)
+            count -= 1
         if count % BATCH_SIZE == 0:
             cur.executemany("INSERT INTO "+ VEC_TABLE_NAME + " (word,vector) VALUES (%(word)s, %(vector)s)", tuple(values))
             con.commit()
-            print('Inserted', count, 'vectors')
+            print('Inserted', count-1, 'vectors')
             values = []
 
         count+= 1
@@ -87,7 +91,7 @@ def insert_vectors(filename, con, cur):
 
     cur.executemany("INSERT INTO "+ VEC_TABLE_NAME + " (word,vector) VALUES (%(word)s, %(vector)s)", tuple(values))
     con.commit()
-    print('Inserted', count, 'vectors')
+    print('Inserted', count-1, 'vectors')
     values = []
 
     return
