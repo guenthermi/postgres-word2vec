@@ -51,6 +51,10 @@ CREATE OR REPLACE FUNCTION pq_search_in(anyarray, integer, integer[]) RETURNS SE
 AS '$libdir/word2vec', 'pq_search_in'
 LANGUAGE C IMMUTABLE STRICT;
 
+CREATE OR REPLACE FUNCTION ivfadc_batch_search(integer[], integer) RETURNS SETOF record
+AS '$libdir/word2vec', 'ivfadc_batch_search'
+LANGUAGE C IMMUTABLE STRICT;
+
 CREATE OR REPLACE FUNCTION cluster_pq_to_id(integer[], integer) RETURNS SETOF record
 AS '$libdir/word2vec', 'cluster_pq'
 LANGUAGE C IMMUTABLE STRICT;
