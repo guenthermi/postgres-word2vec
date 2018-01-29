@@ -170,9 +170,10 @@ def main(argc, argv):
     if argc > 6:
         WORD_INDEX_NAME = argv[5]
         COARSE_INDEX_NAME = argv[6]
-    if argc > 8:
+    if argc > 9:
         m = int(argv[7])
         k = int(argv[8])
+        centr_num_coarse = int(argv[9])
 
     # get vectors
     words, vectors, vectors_size = utils.get_vectors(VEC_FILE_PATH)
