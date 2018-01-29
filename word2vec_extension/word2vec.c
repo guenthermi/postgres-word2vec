@@ -193,7 +193,7 @@ pq_search(PG_FUNCTION_ARGS)
           distance += querySimilarities[j*cbCodes + code];
         }
         if (distance < maxDist){
-          updateTopK(topK, distance, wordId, k, maxDist, 0);
+          updateTopK(topK, distance, wordId, k, maxDist);
           maxDist = topK[k-1].distance;
         }
       }
@@ -301,7 +301,6 @@ ivfadc_search(PG_FUNCTION_ARGS)
     float minDist; // sufficient high value
     int cqId = -1;
 
-    int bestPos;
     int foundInstances;
     Blacklist bl;
 
@@ -354,8 +353,6 @@ ivfadc_search(PG_FUNCTION_ARGS)
 
      Blacklist* newBl;
 
-     bestPos = foundInstances;
-
      // get coarse_quantization(queryVector) (id)
      minDist = 1000;
      for (int i=0; i < cqSize; i++){
@@ -370,7 +367,6 @@ ivfadc_search(PG_FUNCTION_ARGS)
          cqId = i;
        }
      }
-
      end = clock();
      elog(INFO,"determine coarse quantization time %f", (double) (end - start) / CLOCKS_PER_SEC);
 
@@ -434,7 +430,7 @@ ivfadc_search(PG_FUNCTION_ARGS)
             distance += querySimilarities[j*cbCodes + code];
           }
           if (distance < maxDist){
-            updateTopK(topK, distance, wordId, k, maxDist, bestPos);
+            updateTopK(topK, distance, wordId, k, maxDist);
             maxDist = topK[k-1].distance;
           }
         }
@@ -545,7 +541,6 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
     int** cqTableIds;
     int* cqTableIdCounts;
 
-    int* bestPositions;
     int* foundInstances;
     Blacklist* bls;
     bool finished;
@@ -637,7 +632,6 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
    cqIds = palloc(sizeof(int)*queryVectorsSize);
    querySimilarities = palloc(sizeof(float*)*queryVectorsSize);
    maxDists = palloc(sizeof(int)*queryVectorsSize);
-   bestPositions = palloc(sizeof(int)*queryVectorsSize);
    for (int i = 0; i < queryVectorsSize; i++){
      foundInstances[i] = 0;
      bls[i].isValid = false;
@@ -648,7 +642,6 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
      }
      cqIds[i] = -1;
      maxDists[i] = 100;
-     bestPositions[i] = 0;
    }
 
    end = clock();
@@ -773,7 +766,6 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
          wordId = DatumGetInt32(id);
          coarseId = DatumGetInt32(coarseIdData);
          getArray(DatumGetArrayTypeP(vector), &data, &n);
-
          for (int j = 0; j < cqTableIdCounts[coarseId];j++){
            int queryVectorsIndex = cqTableIds[coarseId][j];
            distance = 0;
@@ -782,7 +774,7 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
              distance += querySimilarities[queryVectorsIndex][l*cbCodes + code];
            }
            if (distance < maxDists[queryVectorsIndex]){
-             updateTopK(topKs[queryVectorsIndex], distance, wordId, k, maxDists[queryVectorsIndex], bestPositions[queryVectorsIndex]);
+             updateTopK(topKs[queryVectorsIndex], distance, wordId, k, maxDists[queryVectorsIndex]);
              maxDists[queryVectorsIndex] = topKs[queryVectorsIndex][k-1].distance;
              foundInstances[queryVectorsIndex]++;
            }
@@ -790,7 +782,6 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
        }
        SPI_finish();
      }
-
      for (int i = 0; i < queryVectorsSize; i++){
        if (foundInstances[i] < k){
          finished = false;
@@ -990,7 +981,7 @@ pq_search_in(PG_FUNCTION_ARGS)
           distance += querySimilarities[j*cbCodes + code];
         }
         if (distance < maxDist){
-          updateTopK(topK, distance, wordId, k, maxDist, 0);
+          updateTopK(topK, distance, wordId, k, maxDist);
           maxDist = topK[k-1].distance;
         }
       }
@@ -1201,7 +1192,7 @@ pq_search_in_cplx(PG_FUNCTION_ARGS)
           }
         }
         if (minDist < maxDist){
-          updateTopKCplx(topK, minDist, inputTerms[i], k, maxDist, 0);
+          updateTopKCplx(topK, minDist, inputTerms[i], k, maxDist);
           maxDist = topK[k-1].distance;
         }
       }

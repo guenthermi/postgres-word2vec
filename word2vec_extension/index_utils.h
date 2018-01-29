@@ -55,9 +55,9 @@ typedef CodebookEntryComplete* CodebookWithCounts;
 
 typedef CoarseQuantizerEntry* CoarseQuantizer;
 
-void updateTopK(TopK tk, float distance, int id, int k, int maxDist, int bestPos);
+void updateTopK(TopK tk, float distance, int id, int k, int maxDist);
 
-void updateTopKCplx(TopKCplx tk, float distance, char**, int k, int maxDist, int bestPos);
+void updateTopKCplx(TopKCplx tk, float distance, char**, int k, int maxDist);
 
 void updateTopKWordEntry(char** term, char* word);
 

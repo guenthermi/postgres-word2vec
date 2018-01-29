@@ -9,9 +9,9 @@
 #include "utils/builtins.h"
 #include "utils/array.h"
 
-void updateTopK(TopK tk, float distance, int id, int k, int maxDist, int bestPos){
+void updateTopK(TopK tk, float distance, int id, int k, int maxDist){
   int i;
-  for (i = k-1; i >= bestPos; i--){
+  for (i = k-1; i >= 0; i--){
     if (tk[i].distance < distance){
       break;
     }
@@ -37,9 +37,9 @@ void updateTopKWordEntry(char** term, char* word){
   }
 }
 
-void updateTopKCplx(TopKCplx tk, float distance, char** term, int k, int maxDist, int bestPos){
+void updateTopKCplx(TopKCplx tk, float distance, char** term, int k, int maxDist){
   int i;
-  for (i = k-1; i >= bestPos; i--){
+  for (i = k-1; i >= 0; i--){
     if (tk[i].distance < distance){
       break;
     }
@@ -204,7 +204,6 @@ Codebook getCodebook(int* positions, int* codesize, char* tableName){
       eltype = ARR_ELEMTYPE(vectorAt);
       get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
       deconstruct_array(vectorAt, eltype, typlen, typbyval, typalign, &data, &nulls, &n);
-
       (*positions) = fmax((*positions), pos);
       (*codesize) = fmax((*codesize), code);
 
