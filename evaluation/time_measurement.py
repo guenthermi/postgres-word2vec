@@ -1,4 +1,4 @@
-#!/bin/python3
+#!/usr/bin/python3
 
 import psycopg2
 import sys
@@ -183,9 +183,8 @@ def plot_scatter_graphs_size_dep(time_data_exact, time_data_pq, precision_data_p
     plotly.offline.plot(fig, filename="tmp_size_dep_prec.html", auto_open=True)
     return None
 
-def post_verif_measurement(con, cur, k, samples, resolution):
-    BASIS = 1000
-    factors = [BASIS*n + k for n in range(resolution)]
+def post_verif_measurement(con, cur, k, samples, resolution, basis):
+    factors = [basis*n + k for n in range(resolution)]
 
     _, responses_exact = measurement(cur, con, get_only_exact_query(), k, samples)
     time_values_pq, responses_pq = measurement(cur, con, get_query_set_pq_pv(factors),k,samples)
@@ -219,17 +218,20 @@ def main(argc, argv):
     basis = 100
     time_values = []
     precisions = []
+    HELP_TEXT = '\033[1mtime_measurement.py\033[0m method table_name [k] [sample_size] [resolution] [basis]'
     if argc < 2:
         print('Too few arguments!')
+        print(HELP_TEXT)
         return
     method = argv[1]
-    if argc > 3:
-        k = int(argv[2])
-        number = int(argv[3])
+    VEC_TABLE_NAME = argv[2]
     if argc > 4:
-        resolution = int(argv[4])
+        k = int(argv[3])
+        number = int(argv[4])
     if argc > 5:
-        basis = int(argv[5])
+        resolution = int(argv[5])
+    if argc > 6:
+        basis = int(argv[6])
 
     try:
         con = psycopg2.connect("dbname='" + STD_DB_NAME + "' user='" + STD_USER + "' host='" + STD_HOST + "' password='" + STD_PASSWORD + "'")
@@ -252,7 +254,7 @@ def main(argc, argv):
         time_values = time_values_pq
 
     if method == 'postverification':
-        time_values_pq, precisions_pq, time_values_ivfadc, precisions_ivfadc  = post_verif_measurement(con, cur, k, samples, resolution)
+        time_values_pq, precisions_pq, time_values_ivfadc, precisions_ivfadc  = post_verif_measurement(con, cur, k, samples, resolution, basis)
         plot_scatter_graph(time_values_pq, precisions_pq, time_values_ivfadc, precisions_ivfadc, number)
         time_values = time_values_pq
         precisions = precisions_pq
