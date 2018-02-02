@@ -97,4 +97,6 @@ void updateProductQuantizationRelation(int** nearestCentroids, char** tokens, in
 
 void updateWordVectorsRelation(char* tableName, char** tokens, float** rawVectors, int rawVectorsSize, int vectorSize);
 
+int compare (const void * a, const void * b);
+
 #endif /*INDEX_UTILS_H*/

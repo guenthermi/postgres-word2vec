@@ -1,5 +1,5 @@
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
-\echo Use "CREATE EXTENSION word2vec" to load this file. \quit
+\echo Use "CREATE EXTENSION freddy" to load this file. \quit
 
 CREATE OR REPLACE FUNCTION init(original regclass, normalized regclass, pq_quantization regclass, codebook regclass, residual_quantization regclass, coarse_quantization regclass, residual_codebook regclass) RETURNS void AS $$
 BEGIN
@@ -20,59 +20,59 @@ SELECT CASE (SELECT count(proname) FROM pg_proc WHERE proname='get_vecs_name')
 
 
 CREATE OR REPLACE FUNCTION cosine_similarity(float4[], float4[]) RETURNS float8
-AS '$libdir/word2vec', 'cosine_similarity'
+AS '$libdir/freddy', 'cosine_similarity'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION cosine_similarity_norm(float4[], float4[]) RETURNS float8
-AS '$libdir/word2vec', 'cosine_similarity_norm'
+AS '$libdir/freddy', 'cosine_similarity_norm'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION vec_minus(anyarray, anyarray) RETURNS anyarray
-AS '$libdir/word2vec', 'vec_minus'
+AS '$libdir/freddy', 'vec_minus'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION vec_plus(anyarray, anyarray) RETURNS anyarray
-AS '$libdir/word2vec', 'vec_plus'
+AS '$libdir/freddy', 'vec_plus'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION vec_normalize(anyarray) RETURNS anyarray
-AS '$libdir/word2vec', 'vec_normalize'
+AS '$libdir/freddy', 'vec_normalize'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION pq_search(anyarray, integer) RETURNS SETOF record
-AS '$libdir/word2vec', 'pq_search'
+AS '$libdir/freddy', 'pq_search'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION ivfadc_search(anyarray, integer) RETURNS SETOF record
-AS '$libdir/word2vec', 'ivfadc_search'
+AS '$libdir/freddy', 'ivfadc_search'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION pq_search_in(anyarray, integer, integer[]) RETURNS SETOF record
-AS '$libdir/word2vec', 'pq_search_in'
+AS '$libdir/freddy', 'pq_search_in'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION ivfadc_batch_search(integer[], integer) RETURNS SETOF record
-AS '$libdir/word2vec', 'ivfadc_batch_search'
+AS '$libdir/freddy', 'ivfadc_batch_search'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION cluster_pq_to_id(integer[], integer) RETURNS SETOF record
-AS '$libdir/word2vec', 'cluster_pq'
+AS '$libdir/freddy', 'cluster_pq'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE OR REPLACE FUNCTION grouping_pq_to_id(integer[], anyarray) RETURNS SETOF record
-AS '$libdir/word2vec', 'grouping_pq_to_id'
+CREATE OR REPLACE FUNCTION grouping_pq_to_id(integer[], integer[]) RETURNS SETOF record
+AS '$libdir/freddy', 'grouping_pq_to_id'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION pq_search_in_cplx(anyarray, integer, varchar(100)[]) RETURNS SETOF record
-AS '$libdir/word2vec', 'pq_search_in_cplx'
+AS '$libdir/freddy', 'pq_search_in_cplx'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION insert_batch(varchar(100)[]) RETURNS integer
-AS '$libdir/word2vec', 'insert_batch'
+AS '$libdir/freddy', 'insert_batch'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION centroid(anyarray) RETURNS anyarray
-AS '$libdir/word2vec', 'centroid'
+AS '$libdir/freddy', 'centroid'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION k_nearest_neighbour(term varchar(100), k integer) RETURNS TABLE (word varchar(100), similarity float8) AS $$
@@ -217,7 +217,7 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION top_k_in_pq(term varchar(100), k integer, input_set integer[]) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION knn_in_pq(term varchar(100), k integer, input_set integer[]) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
 DECLARE
 table_name varchar;
 pq_quantization_name varchar;
@@ -235,7 +235,7 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION top_k_in_pq(query_vector anyarray, k integer, input_set integer[]) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION knn_in_pq(query_vector anyarray, k integer, input_set integer[]) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
 DECLARE
 table_name varchar;
 pq_quantization_name varchar;
@@ -251,7 +251,7 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION top_k_in_pq(term varchar(100), k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION knn_in_pq(term varchar(100), k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
 DECLARE
 table_name varchar;
 pq_quantization_name varchar;
@@ -273,7 +273,7 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION top_k_in_pq(query_vector anyarray, k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION knn_in_pq(query_vector anyarray, k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
 DECLARE
 table_name varchar;
 pq_quantization_name varchar;
@@ -325,11 +325,11 @@ $$
 LANGUAGE plpgsql;
 
 -- CREATE OR REPLACE FUNCTION cosine_similarity_norm(anyarray, anyarray) RETURNS float8
--- AS '$libdir/word2vec', 'cosine_similarity_norm'
+-- AS '$libdir/freddy', 'cosine_similarity_norm'
 -- LANGUAGE C IMMUTABLE STRICT;
 
 -- TopK_In Exakt
-CREATE OR REPLACE FUNCTION top_k_in(term varchar(100), k integer, input_set integer[]) RETURNS TABLE (word varchar(100), similarity float8) AS $$
+CREATE OR REPLACE FUNCTION knn_in(term varchar(100), k integer, input_set integer[]) RETURNS TABLE (word varchar(100), similarity float8) AS $$
 DECLARE
 table_name varchar;
 BEGIN
@@ -345,7 +345,7 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION top_k_in(query_vector float4[], k integer, input_set integer[]) RETURNS TABLE (word varchar(100), similarity float8) AS $$
+CREATE OR REPLACE FUNCTION knn_in(query_vector float4[], k integer, input_set integer[]) RETURNS TABLE (word varchar(100), similarity float8) AS $$
 DECLARE
 table_name varchar;
 BEGIN
@@ -360,7 +360,7 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION top_k_in(term varchar(100), k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), similarity float8) AS $$
+CREATE OR REPLACE FUNCTION knn_in(term varchar(100), k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), similarity float8) AS $$
 DECLARE
 table_name varchar;
 formated varchar(100)[];
@@ -442,7 +442,7 @@ LANGUAGE plpgsql;
 -- LANGUAGE plpgsql;
 
 -- w3 - w1 + w2
-CREATE OR REPLACE FUNCTION analogy_3CosAdd(w1 varchar(100), w2 varchar(100), w3 varchar(100), OUT result varchar(100))
+CREATE OR REPLACE FUNCTION analogy_3cosadd(w1 varchar(100), w2 varchar(100), w3 varchar(100), OUT result varchar(100))
 AS  $$
 DECLARE
 table_name varchar;
@@ -463,7 +463,7 @@ $$
 LANGUAGE plpgsql;
 
 -- with postverification
-CREATE OR REPLACE FUNCTION analogy_3CosAdd_pq(w1 varchar(100), w2 varchar(100), w3 varchar(100), OUT result varchar(100))
+CREATE OR REPLACE FUNCTION analogy_3cosadd_pq(w1 varchar(100), w2 varchar(100), w3 varchar(100), OUT result varchar(100))
 AS  $$
 DECLARE
 table_name varchar;
@@ -493,7 +493,7 @@ $$
 LANGUAGE plpgsql;
 
 -- with postverification
-CREATE OR REPLACE FUNCTION analogy_3CosAdd_ivfadc(w1 varchar(100), w2 varchar(100), w3 varchar(100), OUT result varchar(100))
+CREATE OR REPLACE FUNCTION analogy_3cosadd_ivfadc(w1 varchar(100), w2 varchar(100), w3 varchar(100), OUT result varchar(100))
 AS  $$
 DECLARE
 table_name varchar;

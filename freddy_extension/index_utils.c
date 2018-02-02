@@ -597,3 +597,7 @@ void updateWordVectorsRelation(char* tableName, char** tokens, float** rawVector
     pfree(command);
   }
 }
+
+int compare (const void * a, const void * b) {
+   return ( *(int*)a - *(int*)b );
+}

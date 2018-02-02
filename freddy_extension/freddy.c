@@ -53,7 +53,7 @@ typedef struct UsrFctxGrouping {
   int* ids;
   int size;
   int* nearestGroup;
-  float** groupVecs;
+  int* groups;
   int iter;
   int groupsSize; // number of groups
   char **values;
@@ -1551,8 +1551,6 @@ PG_FUNCTION_INFO_V1(grouping_pq_to_id);
 Datum
 grouping_pq_to_id(PG_FUNCTION_ARGS)
 {
-  // input: array of ids to cluster, array of vectors for groups
-  // output: rows (id, group_vector)
 
   FuncCallContext *funcctx;
   TupleDesc        outtertupdesc;
@@ -1563,21 +1561,15 @@ grouping_pq_to_id(PG_FUNCTION_ARGS)
 
   if (SRF_IS_FIRSTCALL ()){
 
-    Oid eltype;
-    int16 typlen;
-    bool typbyval;
-    char typalign;
-    //bool *nulls;
     int n = 0;
 
     MemoryContext  oldcontext;
 
     Datum* idsData;
-    AnyArrayType* groupidArray;
+    Datum* groupIdData;
 
-    int numelems;
-    int nextelem = 0;
-    array_iter iter;
+    int* groupIds;
+    int groupIdsSize;
 
     int* inputIds;
     int inputIdsSize;
@@ -1600,16 +1592,16 @@ grouping_pq_to_id(PG_FUNCTION_ARGS)
     char* command;
     char * cur;
 
+    char* tableName = palloc(sizeof(char)*100);
     char* tableNameCodebook = palloc(sizeof(char)*100);
     char* tableNamePqQuantization = palloc(sizeof(char)*100);
 
+    getTableName(NORMALIZED, tableName, 100);
     getTableName(CODEBOOK, tableNameCodebook, 100);
     getTableName(PQ_QUANTIZATION, tableNamePqQuantization, 100);
 
     funcctx = SRF_FIRSTCALL_INIT ();
     oldcontext = MemoryContextSwitchTo (funcctx->multi_call_memory_ctx);
-
-    groupidArray = PG_GETARG_ARRAYTYPE_P(1);
 
     // read ids from function args
 
@@ -1620,31 +1612,56 @@ grouping_pq_to_id(PG_FUNCTION_ARGS)
     }
     inputIdsSize = n;
 
-    array_iter_setup(&iter, groupidArray);
-    numelems = ArrayGetNItems(AARR_NDIM(groupidArray), AARR_DIMS(groupidArray));
-
-    eltype = AARR_ELEMTYPE(groupidArray);
-    get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
-    if (AARR_NDIM(groupidArray) != 2){
-      elog(ERROR, "Input is not a 2-dimensional array");
+    // read group ids from function args
+    getArray(PG_GETARG_ARRAYTYPE_P(1), &groupIdData, &n);
+    groupIds = palloc(n*sizeof(int));
+    for (int j=0; j< n; j++){
+      groupIds[j] = DatumGetInt32(groupIdData[j]);
     }
+    groupIdsSize = n;
+    qsort(groupIds, groupIdsSize, sizeof(int), compare);
 
-    n = AARR_DIMS(groupidArray)[1];
-    groupVecs = palloc(sizeof(float*)*n);
-    groupVecsSize = numelems / n;
+    // read group vectors
+    SPI_connect();
+    command = palloc( 100* sizeof(char) + inputIdsSize*10*sizeof(char));
+    sprintf(command, "SELECT id, vector FROM %s WHERE id IN (", tableName);
+    // fill command
+    cur = command + strlen(command);
+    for (int i = 0; i < groupIdsSize; i++){
+      if ( i == groupIdsSize - 1){
+          cur += sprintf(cur, "%d", groupIds[i]);
+      }else{
+        cur += sprintf(cur, "%d, ", groupIds[i]);
+      }
+    }
+    cur += sprintf(cur, ") ORDER BY id ASC");
 
-    vectorSize = n;
+    groupVecs = malloc(sizeof(float*)*n);
+    groupVecsSize = n;
 
-    while (nextelem < numelems)
-    {
-        int offset = nextelem++;
-        Datum elem;
-        elem = array_iter_next(&iter, &fcinfo->isnull, offset, typlen, typbyval, typalign);
-        if ((offset % n) == 0){
-          groupVecs[offset / n] = palloc(sizeof(float)*n);
+    ret = SPI_exec(command, 0);
+    proc = SPI_processed;
+    if (proc != groupIdsSize){
+      elog(ERROR, "Group ids do not exist");
+    }
+    if (ret > 0 && SPI_tuptable != NULL){
+      TupleDesc tupdesc = SPI_tuptable->tupdesc;
+      SPITupleTable *tuptable = SPI_tuptable;
+      for (int i = 0; i < proc; i++){
+        Datum groupVector;
+        Datum* dataGroupVector;
+        HeapTuple tuple = tuptable->vals[i];
+
+        groupVector = SPI_getbinval(tuple, tupdesc, 2, &info);
+        getArray(DatumGetArrayTypeP(groupVector), &dataGroupVector, &n);
+        vectorSize = n; // one asignment would be enough...
+        groupVecs[i] = malloc(sizeof(float)*vectorSize);
+        for (int j = 0; j < vectorSize; j++){
+          groupVecs[i][j] = DatumGetFloat4(dataGroupVector[j]);
         }
-        groupVecs[offset / n][offset % n] = DatumGetFloat4(elem);
+      }
     }
+    SPI_finish();
 
     nearestGroup = palloc(sizeof(int)*(inputIdsSize));
 
@@ -1725,20 +1742,25 @@ grouping_pq_to_id(PG_FUNCTION_ARGS)
       SPI_finish();
     }
 
+    for (int i = 0; i < groupVecsSize; i++){
+      free(groupVecs[i]);
+    }
+    free(groupVecs);
+
     usrfctx = (UsrFctxGrouping*) palloc (sizeof (UsrFctxGrouping));
     usrfctx -> ids = inputIds;
     usrfctx -> size = inputIdsSize;
     usrfctx -> nearestGroup = nearestGroup;
-    usrfctx -> groupVecs = groupVecs;
+    usrfctx -> groups = groupIds;
     usrfctx -> iter = 0;
-    usrfctx -> groupsSize = groupVecsSize;
+    usrfctx -> groupsSize = groupIdsSize;
     usrfctx -> values = (char **) palloc (2 * sizeof (char *));
     usrfctx -> values  [0] = (char*) palloc  ((18) * sizeof (char));
     usrfctx -> values  [1] = (char*) palloc   ((18 * vectorSize + 4) * sizeof (char));
     funcctx -> user_fctx = (void *)usrfctx;
     outtertupdesc = CreateTemplateTupleDesc (2 , false);
     TupleDescInitEntry (outtertupdesc,  1, "Ids",    INT4OID, -1, 0);
-    TupleDescInitEntry (outtertupdesc,  2, "Vectors",FLOAT4ARRAYOID,  -1, 0);
+    TupleDescInitEntry (outtertupdesc,  2, "GroupIds",INT4OID,  -1, 0);
     slot = TupleDescGetSlot (outtertupdesc);
     funcctx -> slot = slot;
     attinmeta = TupleDescGetAttInMetadata (outtertupdesc);
@@ -1757,16 +1779,9 @@ grouping_pq_to_id(PG_FUNCTION_ARGS)
 
     Datum result;
     HeapTuple outTuple;
-    char* cursor;
 
     sprintf(usrfctx->values[0], "%d", usrfctx->ids[usrfctx->iter]);
-
-    sprintf(usrfctx->values[1], "{ ");
-    cursor = usrfctx->values[1] + strlen("{ ");
-    for (int i = 0; i < vectorSize; i++){
-      cursor += sprintf(cursor, " %f,", usrfctx -> groupVecs[usrfctx->nearestGroup[usrfctx->iter]][i]);
-    }
-    sprintf(cursor-1, "}");
+    sprintf(usrfctx->values[1], "%d", usrfctx -> groups[usrfctx->nearestGroup[usrfctx->iter]]);
 
     usrfctx->iter++;
     outTuple = BuildTupleFromCStrings (funcctx -> attinmeta,
@@ -1776,6 +1791,7 @@ grouping_pq_to_id(PG_FUNCTION_ARGS)
 
   }
 }
+
 
 PG_FUNCTION_INFO_V1(insert_batch);
 

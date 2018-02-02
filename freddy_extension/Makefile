@@ -1,5 +1,5 @@
-EXTENSION = word2vec
-DATA = word2vec--0.0.1.sql  # script files to install
+EXTENSION = freddy
+DATA = freddy--0.0.1.sql  # script files to install
 OBJS = $(patsubst %.c,%.o,$(wildcard dep/c_hashmap/*.c)) $(patsubst %.c,%.o,$(wildcard *.c))
 MODULE_big = $(EXTENSION)
 PG_CPPFLAGS = -lpq -I/usr/include/postgresql -Idep/c_hashmap -L$(pg_config --libdir) -lpq -fPIC
