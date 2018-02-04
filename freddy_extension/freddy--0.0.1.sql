@@ -59,8 +59,8 @@ CREATE OR REPLACE FUNCTION cluster_pq_to_id(integer[], integer) RETURNS SETOF re
 AS '$libdir/freddy', 'cluster_pq'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE OR REPLACE FUNCTION grouping_pq_to_id(integer[], integer[]) RETURNS SETOF record
-AS '$libdir/freddy', 'grouping_pq_to_id'
+CREATE OR REPLACE FUNCTION grouping_pq(integer[], integer[]) RETURNS SETOF record
+AS '$libdir/freddy', 'grouping_pq'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION pq_search_in_cplx(anyarray, integer, varchar(100)[]) RETURNS SETOF record

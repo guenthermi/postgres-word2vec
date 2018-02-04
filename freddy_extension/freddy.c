@@ -327,7 +327,7 @@ ivfadc_search(PG_FUNCTION_ARGS)
     cq = getCoarseQuantizer(&cqSize);
 
     end = clock();
-    elog(INFO,"get coarse quantizer data time %f", (double) (end - start) / CLOCKS_PER_SEC);
+    elog(INFO,"get coarse quantizer and residual codebook data time %f", (double) (end - start) / CLOCKS_PER_SEC);
 
    // read query from function args
    getArray(PG_GETARG_ARRAYTYPE_P(0), &queryData, &n);
@@ -400,9 +400,6 @@ ivfadc_search(PG_FUNCTION_ARGS)
       // connect to databse and compute approximated similarities with sum method
       SPI_connect();
       sprintf(command, "SELECT id, vector FROM %s WHERE coarse_id = %d", tableNameFineQuantization, cq[cqId].id);
-
-      end = clock();
-      elog(INFO,"create command time %f", (double) (end - start) / CLOCKS_PER_SEC);
 
       ret = SPI_exec(command, 0);
       proc = SPI_processed;
@@ -1546,10 +1543,10 @@ cluster_pq(PG_FUNCTION_ARGS)
   }
 }
 
-PG_FUNCTION_INFO_V1(grouping_pq_to_id);
+PG_FUNCTION_INFO_V1(grouping_pq);
 
 Datum
-grouping_pq_to_id(PG_FUNCTION_ARGS)
+grouping_pq(PG_FUNCTION_ARGS)
 {
 
   FuncCallContext *funcctx;
