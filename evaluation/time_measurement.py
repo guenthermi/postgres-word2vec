@@ -9,6 +9,7 @@ import plotly
 import plotly.graph_objs as go
 import numpy as np
 from random import shuffle
+from random import sample
 
 STD_USER = 'postgres'
 STD_PASSWORD = 'postgres'
@@ -37,11 +38,14 @@ def get_query_set_pq_pv(factors):
 def get_query_set_ivfadc_pv(factors):
     return [(('ivfadc search', factor), 'SELECT word FROM k_nearest_neighbour_ivfadc_pv({!s}, {:d}, ' + str(factor) + ');') for factor in factors]
 
+def get_query_set_ivfadc_batch(size_values, dataset_size):
+    return [(('ivfadc batch search', size), 'SELECT * FROM ivfadc_batch_search(' + serialize_ids(sample(range(1, dataset_size+1), size)) + ', {:d}) AS (id integer, target integer, squaredistance float4);') for size in size_values]
+
 def get_exact_query_topkin(size_values, ids):
-    return [(('brute-force', size), 'SELECT word FROM  top_k_in({!s}, {:d}, ' + serialize_ids(ids[:size]) + ' );') for size in size_values]
+    return [(('brute-force', size), 'SELECT word FROM  knn_in({!s}, {:d}, ' + serialize_ids(ids[:size]) + ' );') for size in size_values]
 
 def get_query_set_topkin_pq(size_values, ids):
-    return [(('pq search', size), 'SELECT word FROM  top_k_in_pq({!s}, {:d}, ' + serialize_ids(ids[:size]) + ' );') for size in size_values]
+    return [(('pq search', size), 'SELECT word FROM  knn_in_pq({!s}, {:d}, ' + serialize_ids(ids[:size]) + ' );') for size in size_values]
 
 def serialize_ids(ids):
     result = ''
@@ -69,6 +73,14 @@ def get_samples(con, cur, number, size):
     cur.execute(query)
     return [x[0] for x in cur.fetchall()]
 
+def get_id_samples(dataset_size, number, size):
+    result = []
+    ids = list(range(1, dataset_size))
+    random.seed()
+    for i in range(number):
+        shuffle(ids)
+        result.append(ids[:size])
+    return result
 
 def measurement(cur, con, query_set, k, samples):
     time_values = {}
@@ -90,6 +102,23 @@ def measurement(cur, con, query_set, k, samples):
             count += 1
             print('Iteration', count, 'completed')
     return time_values, responses
+
+def measurement_simple(cur, con, size_values, k, number, dataset_size):
+    time_values = {}
+    count = 0
+    for i in range(number):
+        for (name, query) in get_query_set_ivfadc_batch(size_values, dataset_size):
+            if not name in time_values:
+                time_values[name] = []
+            rendered_query = query.format(k)
+            start = time.time()
+            cur.execute(rendered_query)
+            result = cur.fetchall()
+            end = time.time()
+            time_values[name].append((end-start))
+            count += 1
+            print('Iteration', count, 'completed')
+    return time_values
 
 def calculate_precision(responses, exact, threshold=5):
     result = dict()
@@ -183,6 +212,30 @@ def plot_scatter_graphs_size_dep(time_data_exact, time_data_pq, precision_data_p
     plotly.offline.plot(fig, filename="tmp_size_dep_prec.html", auto_open=True)
     return None
 
+def plot_scatter_graph_batch(time_data):
+    keys = sorted(time_data.keys(), key=lambda x: x[1])
+    sc_time = go.Scatter(
+        x=[key[1] for key in keys],
+        y=[np.mean(time_data[key]) for key in keys],
+        mode = 'lines+markers',
+        name='Product Quantization'
+    )
+    sc_quotient = go.Scatter(
+        x=[key[1] for key in keys],
+        y=[np.mean(time_data[key]) / int(key[1]) for key in keys],
+        mode = 'lines+markers',
+        name='Product Quantization'
+    )
+
+    layout = go.Layout(xaxis= dict(title='size of batch', titlefont=dict(size=20), tickfont=dict(size=20)), yaxis=dict(title='time in seconds',tickfont=dict(size=20)), )
+    fig_time = go.Figure(data=[sc_time], layout=layout)
+    plotly.offline.plot(fig_time, filename="tmp_batch_time_absolut.html", auto_open=True)
+
+    fig_quotient = go.Figure(data=[sc_quotient], layout=layout)
+    plotly.offline.plot(fig_quotient, filename="tmp_batch_time_relative.html", auto_open=True)
+
+
+
 def post_verif_measurement(con, cur, k, samples, resolution, basis):
     factors = [basis*n + k for n in range(resolution)]
 
@@ -193,8 +246,7 @@ def post_verif_measurement(con, cur, k, samples, resolution, basis):
     precisions_ivfadc = calculate_precision(responses_ivfadc, responses_exact['brute-force'])
     return time_values_pq, precisions_pq, time_values_ivfadc, precisions_ivfadc
 
-def size_dependend_measurement(con, cur, k, samples, resolution, basis):
-    dataset_size = 1193513
+def size_dependend_measurement(con, cur, k, samples, resolution, basis, dataset_size):
     size_values = [basis*n + k for n in range(resolution)]
     ids = list(range(1, dataset_size))
     random.seed()
@@ -207,7 +259,10 @@ def size_dependend_measurement(con, cur, k, samples, resolution, basis):
         precisions[key] = precision
     return time_values_pq, time_values_exact, precisions
 
-
+def batch_measurement(con, cur, k, resolution, basis, dataset_size, number):
+    size_values = [basis*n + 1 for n in range(resolution)]
+    time_values = measurement_simple(cur, con, size_values, k, number, dataset_size)
+    return time_values
 
 def main(argc, argv):
     global VEC_TABLE_NAME
@@ -216,8 +271,9 @@ def main(argc, argv):
     m_type = ''
     resolution = 10
     basis = 100
-    time_values = []
-    precisions = []
+    time_values = dict()
+    precisions = dict()
+    samples = None
     HELP_TEXT = '\033[1mtime_measurement.py\033[0m method table_name [k] [sample_size] [resolution] [basis]'
     if argc < 2:
         print('Too few arguments!')
@@ -241,15 +297,15 @@ def main(argc, argv):
     cur = con.cursor()
 
     data_size = get_vector_dataset_size(cur)
-    samples = get_samples(con, cur, number, data_size)
+    if method != 'batch':
+        samples = get_samples(con, cur, number, data_size)
 
     if method == 'default':
         time_values, responses = measurement(cur, con, get_query_set_full(), k, samples)
         precisions = calculate_precision(responses, responses['brute-force'])
         plot_bars(time_values)
     if method == 'sizedependend':
-        print('get here')
-        time_values_pq, time_values_exact, precisions = size_dependend_measurement(con, cur, k, samples, resolution, basis)
+        time_values_pq, time_values_exact, precisions = size_dependend_measurement(con, cur, k, samples, resolution, basis, data_size)
         plot_scatter_graphs_size_dep(time_values_exact, time_values_pq, precisions)
         time_values = time_values_pq
 
@@ -258,6 +314,12 @@ def main(argc, argv):
         plot_scatter_graph(time_values_pq, precisions_pq, time_values_ivfadc, precisions_ivfadc, number)
         time_values = time_values_pq
         precisions = precisions_pq
+
+    if method == 'batch':
+        time_values = batch_measurement(con, cur, k, resolution, basis, data_size, number)
+        plot_scatter_graph_batch(time_values)
+        for key in time_values.keys():
+            precisions[key] = None
 
 
     print('Parameters k:', k, 'Number of Queries:', number)
