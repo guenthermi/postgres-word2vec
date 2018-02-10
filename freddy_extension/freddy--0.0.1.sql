@@ -200,9 +200,9 @@ BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 EXECUTE 'SELECT get_vecs_name_pq_quantization()' INTO pq_quantization_name;
 RETURN QUERY EXECUTE format('
-SELECT pqq.word AS word, distance AS distance
+SELECT pqs.word AS word, distance AS distance
 FROM %s AS gv, pq_search(gv.vector, %s) AS (idx integer, distance float4)
-INNER JOIN %s AS pqq ON idx = pqq.id
+INNER JOIN %s AS pqs ON idx = pqs.id
 WHERE gv.word = ''%s''
 ', table_name, k, pq_quantization_name, replace(term, '''', ''''''));
 END
@@ -215,9 +215,9 @@ pq_quantization_name varchar;
 BEGIN
 EXECUTE 'SELECT get_vecs_name_pq_quantization()' INTO pq_quantization_name;
 RETURN QUERY EXECUTE format('
-SELECT pqq.word AS word, distance AS distance
+SELECT pqs.word AS word, distance AS distance
 FROM pq_search(''%s''::float4[], %s) AS (idx integer, distance float4)
-INNER JOIN %s AS pqq ON idx = pqq.id
+INNER JOIN %s AS pqs ON idx = pqs.id
 ', input_vector, k, pq_quantization_name);
 END
 $$
@@ -230,10 +230,10 @@ pq_quantization_name varchar;
 BEGIN
 EXECUTE 'SELECT get_vecs_name_pq_quantization()' INTO pq_quantization_name;
 RETURN QUERY EXECUTE format('
-SELECT pqq.word AS word, distance AS distance
+SELECT pqs.word AS word, distance AS distance
 FROM pq_search(''%s''::float4[], %s) AS (idx integer, distance float4)
-INNER JOIN %s AS pqq ON idx = pqq.id
-ORDER BY cosine_similarity(''%s''::float4[], pqq.word) DESC
+INNER JOIN %s AS pqs ON idx = pqs.id
+ORDER BY cosine_similarity(''%s''::float4[], pqs.word) DESC
 FETCH FIRST %s ROWS ONLY
 ', input_vector, post_verif, pq_quantization_name, input_vector, k);
 END
@@ -248,11 +248,11 @@ BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 EXECUTE 'SELECT get_vecs_name_pq_quantization()' INTO pq_quantization_name;
 RETURN QUERY EXECUTE format('
-SELECT pqq.word AS word, distance AS distance
+SELECT pqs.word AS word, distance AS distance
 FROM %s as wv, pq_search(wv.vector, %s) AS (idx integer, distance float4)
-INNER JOIN %s AS pqq ON idx = pqq.id
+INNER JOIN %s AS pqs ON idx = pqs.id
 WHERE wv.word = ''%s''
-ORDER BY cosine_similarity(wv.vector, pqq.word) DESC
+ORDER BY cosine_similarity(wv.vector, pqs.word) DESC
 FETCH FIRST %s ROWS ONLY
 ', table_name, post_verif, pq_quantization_name, replace(term, '''', ''''''), k);
 END
@@ -268,9 +268,9 @@ EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 EXECUTE 'SELECT get_vecs_name_pq_quantization()' INTO pq_quantization_name;
 
 RETURN QUERY EXECUTE format('
-SELECT pqq.word, distance
+SELECT pqs.word, distance
 FROM %s AS gv, pq_search_in(gv.vector, %s, ''%s''::int[]) AS (result_id integer, distance float4)
-INNER JOIN %s AS pqq ON result_id = pqq.id
+INNER JOIN %s AS pqs ON result_id = pqs.id
 WHERE gv.word = ''%s''
 ', table_name, k, input_set, pq_quantization_name, replace(term, '''', ''''''));
 END
@@ -285,9 +285,9 @@ BEGIN
 EXECUTE 'SELECT get_vecs_name_pq_quantization()' INTO pq_quantization_name;
 
 RETURN QUERY EXECUTE format('
-SELECT pqq.word, distance
+SELECT pqs.word, distance
 FROM pq_search_in(''%s''::float4[], %s, ''%s''::int[]) AS (result_id integer, distance float4)
-INNER JOIN %s AS pqq ON result_id = pqq.id
+INNER JOIN %s AS pqs ON result_id = pqs.id
 ', query_vector, k, input_set, pq_quantization_name);
 END
 $$
@@ -306,9 +306,9 @@ FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
 END LOOP;
 
 RETURN QUERY EXECUTE format('
-SELECT pqq.word, distance
+SELECT pqs.word, distance
 FROM %s AS gv, pq_search_in(gv.vector, %s, ARRAY(SELECT id FROM %s WHERE word = ANY (''%s''::varchar(100)[]))) AS (result_id integer, distance float4)
-INNER JOIN %s AS pqq ON result_id = pqq.id
+INNER JOIN %s AS pqs ON result_id = pqs.id
 WHERE gv.word = ''%s''
 ', table_name, k, table_name, formated, pq_quantization_name, replace(term, '''', ''''''));
 END
@@ -328,9 +328,9 @@ FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
 END LOOP;
 
 RETURN QUERY EXECUTE format('
-SELECT pqq.word, distance
+SELECT pqs.word, distance
 FROM pq_search_in(''%s''::float4[], %s, ARRAY(SELECT id FROM %s WHERE word = ANY (''%s''::varchar(100)[]))) AS (result_id integer, distance float4)
-INNER JOIN %s AS pqq ON result_id = pqq.id
+INNER JOIN %s AS pqs ON result_id = pqs.id
 ', query_vector, k, table_name, formated, pq_quantization_name);
 END
 $$
@@ -423,6 +423,26 @@ END
 $$
 LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION knn_in(query_vector float4[], k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), similarity float8) AS $$
+DECLARE
+table_name varchar;
+formated varchar(100)[];
+BEGIN
+EXECUTE 'SELECT get_vecs_name()' INTO table_name;
+-- execute replace on every element of input set
+FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
+  formated[I] = replace(input_set[I], '''', '''''');
+END LOOP;
+RETURN QUERY EXECUTE format('
+SELECT v2.word, cosine_similarity_norm(''%s''::float4[], v2.vector) FROM %s AS v2
+WHERE v2.word = ANY (''%s''::varchar(100)[])
+ORDER BY cosine_similarity_norm(''%s''::float4[], v2.vector) DESC
+FETCH FIRST %s ROWS ONLY
+', query_vector, table_name, formated, query_vector, k);
+END
+$$
+LANGUAGE plpgsql;
+
 
 CREATE OR REPLACE FUNCTION cluster_pq(terms varchar(100)[], k integer) RETURNS  TABLE (words varchar(100)[]) AS $$
 DECLARE
@@ -458,6 +478,26 @@ INNER JOIN %s AS v2 ON v2.word = ''%s''
 INNER JOIN %s AS v3 ON v3.word = ''%s''
 WHERE v4.word NOT IN (''%s'', ''%s'', ''%s'')
 ORDER BY cosine_similarity(vec_minus(v1.vector, v2.vector), vec_minus(v3.vector, v4.vector)) DESC
+FETCH FIRST 1 ROWS ONLY
+', table_name, table_name, replace(w1, '''', ''''''), table_name, replace(w2, '''', ''''''), table_name, replace(w3, '''', ''''''), replace(w1, '''', ''''''), replace(w2, '''', ''''''), replace(w3, '''', '''''')) INTO result;
+END
+$$
+LANGUAGE plpgsql;
+
+-- TODO 3CosMul
+CREATE OR REPLACE FUNCTION analogy_3cosmul(w1 varchar(100), w2 varchar(100), w3 varchar(100), OUT result varchar(100))
+AS  $$
+DECLARE
+table_name varchar;
+BEGIN
+EXECUTE 'SELECT get_vecs_name_original()' INTO table_name;
+EXECUTE format('
+SELECT v4.word FROM %s AS v4
+INNER JOIN %s AS v1 ON v1.word = ''%s''
+INNER JOIN %s AS v2 ON v2.word = ''%s''
+INNER JOIN %s AS v3 ON v3.word = ''%s''
+WHERE v4.word NOT IN (''%s'', ''%s'', ''%s'')
+ORDER BY (((cosine_similarity(v4.vector, v3.vector) + 1)/2) * ((cosine_similarity(v4.vector, v2.vector) + 1.0)/2.0)) /  (((cosine_similarity(v4.vector, v1.vector) + 1.0)/2.0)+0.001) DESC
 FETCH FIRST 1 ROWS ONLY
 ', table_name, table_name, replace(w1, '''', ''''''), table_name, replace(w2, '''', ''''''), table_name, replace(w3, '''', ''''''), replace(w1, '''', ''''''), replace(w2, '''', ''''''), replace(w3, '''', '''''')) INTO result;
 END
@@ -504,6 +544,32 @@ END
 $$
 LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION analogy_3cosadd_in(w1 varchar(100), w2 varchar(100), w3 varchar(100), input_set varchar(100)[], OUT result varchar(100))
+AS  $$
+DECLARE
+table_name varchar;
+formated varchar(100)[];
+command varchar;
+test varchar;
+BEGIN
+EXECUTE 'SELECT get_vecs_name()' INTO table_name;
+FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
+  formated[I] = replace(input_set[I], '''', '''''');
+END LOOP;
+EXECUTE format('
+SELECT v4.word
+FROM %s AS v4
+INNER JOIN %s AS v1 ON v1.word = ''%s''
+INNER JOIN %s AS v2 ON v2.word = ''%s''
+INNER JOIN %s AS v3 ON v3.word = ''%s''
+WHERE (v4.word NOT IN (''%s'', ''%s'', ''%s'')) AND (v4.word = ANY (''%s''::varchar[]))
+ORDER BY cosine_similarity(vec_plus(vec_minus(v3.vector, v1.vector), v2.vector), v4.vector) DESC
+FETCH FIRST 1 ROWS ONLY
+', table_name, table_name, replace(w1, '''', ''''''), table_name, replace(w2, '''', ''''''), table_name, replace(w3, '''', ''''''), replace(w1, '''', ''''''), replace(w2, '''', ''''''), replace(w3, '''', ''''''), formated) INTO result;
+END
+$$
+LANGUAGE plpgsql;
+
 -- with postverification
 CREATE OR REPLACE FUNCTION analogy_3cosadd_pq(w1 varchar(100), w2 varchar(100), w3 varchar(100), OUT result varchar(100))
 AS  $$
@@ -514,22 +580,55 @@ BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 EXECUTE 'SELECT get_vecs_name_pq_quantization()' INTO pq_quantization_name;
 EXECUTE format('
-SELECT pqq.word FROM
+SELECT pqs.word FROM
 %s AS v1,
 %s AS v2,
 %s AS v3,
 pq_search(vec_normalize(vec_plus(vec_minus(v3.vector, v1.vector), v2.vector)), 100) AS (idx integer, distance float4)
-INNER JOIN %s AS pqq ON idx = pqq.id
-INNER JOIN %s AS v4 ON v4.word = pqq.word
+INNER JOIN %s AS pqs ON idx = pqs.id
+INNER JOIN %s AS v4 ON v4.word = pqs.word
 WHERE (v1.word = ''%s'')
 AND (v2.word = ''%s'')
 AND (v3.word = ''%s'')
-AND (pqq.word != v1.word)
-AND (pqq.word != v2.word)
-AND (pqq.word != v3.word)
+AND (pqs.word != v1.word)
+AND (pqs.word != v2.word)
+AND (pqs.word != v3.word)
 ORDER BY cosine_similarity(vec_plus(vec_minus(v3.vector, v1.vector), v2.vector), v4.vector) DESC
 FETCH FIRST 1 ROWS ONLY
 ', table_name, table_name, table_name, pq_quantization_name, table_name, replace(w1, '''', ''''''), replace(w2, '''', ''''''), replace(w3, '''', '''''')) INTO result;
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION analogy_3cosadd_in_pq(w1 varchar(100), w2 varchar(100), w3 varchar(100), input_set varchar(100)[], OUT result varchar(100))
+AS  $$
+DECLARE
+table_name varchar;
+pq_quantization_name varchar;
+formated varchar(100)[];
+BEGIN
+EXECUTE 'SELECT get_vecs_name()' INTO table_name;
+EXECUTE 'SELECT get_vecs_name_pq_quantization()' INTO pq_quantization_name;
+FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
+  formated[I] = replace(input_set[I], '''', '''''');
+END LOOP;
+EXECUTE format('
+SELECT pqs.word FROM
+%s AS v1,
+%s AS v2,
+%s AS v3,
+pq_search_in(vec_normalize(vec_plus(vec_minus(v3.vector, v1.vector), v2.vector)), 100, ARRAY(SELECT id FROM %s WHERE word = ANY (''%s''::varchar[]))) AS (idx integer, distance float4)
+INNER JOIN %s AS pqs ON idx = pqs.id
+INNER JOIN %s AS v4 ON v4.word = pqs.word
+WHERE (v1.word = ''%s'')
+AND (v2.word = ''%s'')
+AND (v3.word = ''%s'')
+AND (pqs.word != v1.word)
+AND (pqs.word != v2.word)
+AND (pqs.word != v3.word)
+ORDER BY cosine_similarity(vec_plus(vec_minus(v3.vector, v1.vector), v2.vector), v4.vector) DESC
+FETCH FIRST 1 ROWS ONLY
+', table_name, table_name, table_name, pq_quantization_name, formated, pq_quantization_name, table_name, replace(w1, '''', ''''''), replace(w2, '''', ''''''), replace(w3, '''', ''''''), formated) INTO result;
 END
 $$
 LANGUAGE plpgsql;
@@ -575,16 +674,16 @@ terms_formated varchar[];
 BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 FOR I IN array_lower(groups, 1)..array_upper(groups, 1) LOOP
-  groups_formated[I] = replace(groups[I], '''', '''''');
+  groups_formated[I] = replace(groups[I], '''', '''''''''');
 END LOOP;
 FOR I IN array_lower(terms, 1)..array_upper(terms, 1) LOOP
-  terms_formated[I] = replace(terms[I], '''', '''''');
+  terms_formated[I] = replace(terms[I], '''', '''''''''');
 END LOOP;
 
 RETURN QUERY EXECUTE format('
 SELECT v1.word, gt.word
 FROM %s AS v1,
-top_k_in(v1.word, 1, ''%s''::varchar[]) AS gt
+knn_in(v1.word, 1, ''%s''::varchar[]) AS gt
 WHERE v1.word = ANY(''%s''::varchar[])
 ', table_name, groups_formated, terms_formated);
 END
