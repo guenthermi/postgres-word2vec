@@ -75,7 +75,7 @@ CREATE OR REPLACE FUNCTION centroid(anyarray) RETURNS anyarray
 AS '$libdir/freddy', 'centroid'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE OR REPLACE FUNCTION k_nearest_neighbour(term varchar(100), k integer) RETURNS TABLE (word varchar(100), similarity float8) AS $$
+CREATE OR REPLACE FUNCTION k_nearest_neighbour(token varchar(100), k integer) RETURNS TABLE (word varchar(100), similarity float8) AS $$
 DECLARE
 table_name varchar;
 BEGIN
@@ -85,7 +85,7 @@ SELECT v2.word, cosine_similarity_norm(v1.vector, v2.vector) FROM %s AS v2
 INNER JOIN %s AS v1 ON v1.word = ''%s''
 ORDER BY cosine_similarity_norm(v1.vector, v2.vector) DESC
 FETCH FIRST %s ROWS ONLY
-', table_name, table_name, replace(term, '''', ''''''), k);
+', table_name, table_name, replace(token, '''', ''''''), k);
 END
 $$
 LANGUAGE plpgsql;
@@ -105,7 +105,7 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc(term varchar(100), k integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc(token varchar(100), k integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
 DECLARE
 table_name varchar;
 fine_quantization_name varchar;
@@ -117,7 +117,7 @@ SELECT fq.word, distance
 FROM %s AS gv, ivfadc_search(gv.vector, %s) AS (idx integer, distance float4)
 INNER JOIN %s AS fq ON idx = fq.id
 WHERE gv.word = ''%s''
-', table_name, k, fine_quantization_name, replace(term, '''', ''''''));
+', table_name, k, fine_quantization_name, replace(token, '''', ''''''));
 END
 $$
 LANGUAGE plpgsql;
@@ -159,7 +159,7 @@ $$
 LANGUAGE plpgsql;
 
 
-CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc_pv(term varchar(100), k integer, post_verif integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc_pv(token varchar(100), k integer, post_verif integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
 DECLARE
 table_name varchar;
 BEGIN
@@ -171,7 +171,7 @@ INNER JOIN %s AS v2 ON idx = v2.id
 WHERE v1.word = ''%s''
 ORDER BY cosine_similarity(v1.vector, v2.vector) DESC
 FETCH FIRST %s ROWS ONLY
-', table_name, post_verif, table_name, replace(term, '''', ''''''), k);
+', table_name, post_verif, table_name, replace(token, '''', ''''''), k);
 END
 $$
 LANGUAGE plpgsql;
@@ -192,7 +192,7 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION k_nearest_neighbour_pq(term varchar(100), k integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION k_nearest_neighbour_pq(token varchar(100), k integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
 DECLARE
 table_name varchar;
 pq_quantization_name varchar;
@@ -204,7 +204,7 @@ SELECT pqs.word AS word, distance AS distance
 FROM %s AS gv, pq_search(gv.vector, %s) AS (idx integer, distance float4)
 INNER JOIN %s AS pqs ON idx = pqs.id
 WHERE gv.word = ''%s''
-', table_name, k, pq_quantization_name, replace(term, '''', ''''''));
+', table_name, k, pq_quantization_name, replace(token, '''', ''''''));
 END
 $$
 LANGUAGE plpgsql;
@@ -240,7 +240,7 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION k_nearest_neighbour_pq_pv(term varchar(100), k integer, post_verif integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION k_nearest_neighbour_pq_pv(token varchar(100), k integer, post_verif integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
 DECLARE
 table_name varchar;
 pq_quantization_name varchar;
@@ -254,12 +254,12 @@ INNER JOIN %s AS pqs ON idx = pqs.id
 WHERE wv.word = ''%s''
 ORDER BY cosine_similarity(wv.vector, pqs.word) DESC
 FETCH FIRST %s ROWS ONLY
-', table_name, post_verif, pq_quantization_name, replace(term, '''', ''''''), k);
+', table_name, post_verif, pq_quantization_name, replace(token, '''', ''''''), k);
 END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION knn_in_pq(term varchar(100), k integer, input_set integer[]) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION knn_in_pq(token varchar(100), k integer, input_set integer[]) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
 DECLARE
 table_name varchar;
 pq_quantization_name varchar;
@@ -272,7 +272,7 @@ SELECT pqs.word, distance
 FROM %s AS gv, pq_search_in(gv.vector, %s, ''%s''::int[]) AS (result_id integer, distance float4)
 INNER JOIN %s AS pqs ON result_id = pqs.id
 WHERE gv.word = ''%s''
-', table_name, k, input_set, pq_quantization_name, replace(term, '''', ''''''));
+', table_name, k, input_set, pq_quantization_name, replace(token, '''', ''''''));
 END
 $$
 LANGUAGE plpgsql;
@@ -293,7 +293,7 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION knn_in_pq(term varchar(100), k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION knn_in_pq(token varchar(100), k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
 DECLARE
 table_name varchar;
 pq_quantization_name varchar;
@@ -310,7 +310,7 @@ SELECT pqs.word, distance
 FROM %s AS gv, pq_search_in(gv.vector, %s, ARRAY(SELECT id FROM %s WHERE word = ANY (''%s''::varchar(100)[]))) AS (result_id integer, distance float4)
 INNER JOIN %s AS pqs ON result_id = pqs.id
 WHERE gv.word = ''%s''
-', table_name, k, table_name, formated, pq_quantization_name, replace(term, '''', ''''''));
+', table_name, k, table_name, formated, pq_quantization_name, replace(token, '''', ''''''));
 END
 $$
 LANGUAGE plpgsql;
@@ -336,7 +336,7 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION cosine_similarity(term1 varchar(100), term2 varchar(100), OUT result float8) AS $$
+CREATE OR REPLACE FUNCTION cosine_similarity(token1 varchar(100), token2 varchar(100), OUT result float8) AS $$
 DECLARE
 table_name varchar;
 BEGIN
@@ -346,12 +346,12 @@ EXECUTE format('
 SELECT cosine_similarity(t1.vector, t2.vector)
 FROM %s AS t1, %s AS t2
 WHERE (t1.word = ''%s'') AND (t2.word = ''%s'')
-', table_name, table_name, replace(term1, '''', ''''''), replace(term2, '''', '''''')) INTO result;
+', table_name, table_name, replace(token1, '''', ''''''), replace(token2, '''', '''''')) INTO result;
 END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION cosine_similarity(vector float4[], term2 varchar(100), OUT result float8) AS $$
+CREATE OR REPLACE FUNCTION cosine_similarity(vector float4[], token2 varchar(100), OUT result float8) AS $$
 DECLARE
 table_name varchar;
 BEGIN
@@ -361,7 +361,7 @@ EXECUTE format('
 SELECT cosine_similarity(''%s''::float4[], t2.vector)
 FROM %s AS t2
 WHERE t2.word = ''%s''
-', vector, table_name, replace(term2, '''', '''''')) INTO result;
+', vector, table_name, replace(token2, '''', '''''')) INTO result;
 END
 $$
 LANGUAGE plpgsql;
@@ -371,7 +371,7 @@ LANGUAGE plpgsql;
 -- LANGUAGE C IMMUTABLE STRICT;
 
 -- TopK_In Exakt
-CREATE OR REPLACE FUNCTION knn_in(term varchar(100), k integer, input_set integer[]) RETURNS TABLE (word varchar(100), similarity float8) AS $$
+CREATE OR REPLACE FUNCTION knn_in(token varchar(100), k integer, input_set integer[]) RETURNS TABLE (word varchar(100), similarity float8) AS $$
 DECLARE
 table_name varchar;
 BEGIN
@@ -382,7 +382,7 @@ INNER JOIN %s AS v1 ON v1.word = ''%s''
 WHERE v2.id = ANY (''%s''::integer[])
 ORDER BY cosine_similarity_norm(v1.vector, v2.vector) DESC
 FETCH FIRST %s ROWS ONLY
-', table_name, table_name, replace(term, '''', ''''''), input_set, k);
+', table_name, table_name, replace(token, '''', ''''''), input_set, k);
 END
 $$
 LANGUAGE plpgsql;
@@ -402,7 +402,7 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION knn_in(term varchar(100), k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), similarity float8) AS $$
+CREATE OR REPLACE FUNCTION knn_in(token varchar(100), k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), similarity float8) AS $$
 DECLARE
 table_name varchar;
 formated varchar(100)[];
@@ -418,7 +418,7 @@ INNER JOIN %s AS v1 ON v1.word = ''%s''
 WHERE v2.word = ANY (''%s''::varchar(100)[])
 ORDER BY cosine_similarity_norm(v1.vector, v2.vector) DESC
 FETCH FIRST %s ROWS ONLY
-', table_name, table_name, replace(term, '''', ''''''), formated, k);
+', table_name, table_name, replace(token, '''', ''''''), formated, k);
 END
 $$
 LANGUAGE plpgsql;
@@ -444,14 +444,14 @@ $$
 LANGUAGE plpgsql;
 
 
-CREATE OR REPLACE FUNCTION cluster_pq(terms varchar(100)[], k integer) RETURNS  TABLE (words varchar(100)[]) AS $$
+CREATE OR REPLACE FUNCTION cluster_pq(tokens varchar(100)[], k integer) RETURNS  TABLE (words varchar(100)[]) AS $$
 DECLARE
 table_name varchar;
 formated varchar(100)[];
 BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
-FOR I IN array_lower(terms, 1)..array_upper(terms, 1) LOOP
-  formated[I] = replace(terms[I], '''', '''''');
+FOR I IN array_lower(tokens, 1)..array_upper(tokens, 1) LOOP
+  formated[I] = replace(tokens[I], '''', '''''');
 END LOOP;
 
 RETURN QUERY EXECUTE format('
@@ -666,18 +666,18 @@ $$
 LANGUAGE plpgsql;
 
 -- without pq-index
-CREATE OR REPLACE FUNCTION grouping_func(terms varchar(100)[], groups varchar(100)[]) RETURNS TABLE (term varchar(100), groupterm varchar(100)) AS $$
+CREATE OR REPLACE FUNCTION grouping_func(tokens varchar(100)[], groups varchar(100)[]) RETURNS TABLE (token varchar(100), grouptoken varchar(100)) AS $$
 DECLARE
 table_name varchar;
 groups_formated varchar[];
-terms_formated varchar[];
+tokens_formated varchar[];
 BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 FOR I IN array_lower(groups, 1)..array_upper(groups, 1) LOOP
   groups_formated[I] = replace(groups[I], '''', '''''''''');
 END LOOP;
-FOR I IN array_lower(terms, 1)..array_upper(terms, 1) LOOP
-  terms_formated[I] = replace(terms[I], '''', '''''''''');
+FOR I IN array_lower(tokens, 1)..array_upper(tokens, 1) LOOP
+  tokens_formated[I] = replace(tokens[I], '''', '''''''''');
 END LOOP;
 
 RETURN QUERY EXECUTE format('
@@ -685,24 +685,24 @@ SELECT v1.word, gt.word
 FROM %s AS v1,
 knn_in(v1.word, 1, ''%s''::varchar[]) AS gt
 WHERE v1.word = ANY(''%s''::varchar[])
-', table_name, groups_formated, terms_formated);
+', table_name, groups_formated, tokens_formated);
 END
 $$
 LANGUAGE plpgsql;
 
 -- with PQ-Index
-CREATE OR REPLACE FUNCTION grouping_func_pq(terms varchar(100)[], groups varchar(100)[]) RETURNS TABLE (term varchar(100), groupterm varchar(100)) AS $$
+CREATE OR REPLACE FUNCTION grouping_func_pq(tokens varchar(100)[], groups varchar(100)[]) RETURNS TABLE (token varchar(100), grouptoken varchar(100)) AS $$
 DECLARE
 table_name varchar;
 groups_formated varchar[];
-terms_formated varchar[];
+tokens_formated varchar[];
 BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 FOR I IN array_lower(groups, 1)..array_upper(groups, 1) LOOP
   groups_formated[I] = replace(groups[I], '''', '''''');
 END LOOP;
-FOR I IN array_lower(terms, 1)..array_upper(terms, 1) LOOP
-  terms_formated[I] = replace(terms[I], '''', '''''');
+FOR I IN array_lower(tokens, 1)..array_upper(tokens, 1) LOOP
+  tokens_formated[I] = replace(tokens[I], '''', '''''');
 END LOOP;
 
 RETURN QUERY EXECUTE format('
@@ -710,7 +710,7 @@ SELECT v1.word, v2.word
 FROM grouping_pq(ARRAY(SELECT id FROM %s WHERE word = ANY (''%s'')),ARRAY(SELECT id FROM %s WHERE word = ANY (''%s''))) AS (token_id integer, group_id integer)
 INNER JOIN %s AS v1 ON v1.id = token_id
 INNER JOIN %s AS v2 ON v2.id = group_id
-', table_name, terms_formated, table_name, groups_formated, table_name, table_name);
+', table_name, tokens_formated, table_name, groups_formated, table_name, table_name);
 END
 $$
 LANGUAGE plpgsql;
