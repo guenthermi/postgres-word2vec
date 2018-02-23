@@ -1868,7 +1868,7 @@ insert_batch(PG_FUNCTION_ARGS)
   inputTermsSize = n;
 
   // determine tokenization
-  command = palloc(sizeof(char)*inputTermsPlaneSize*3 + 100);
+  command = palloc(sizeof(char)*inputTermsPlaneSize*3 + 200);
   cur = command;
   cur += sprintf(cur, "SELECT replace(term, ' ', '_') AS token, tokenize(term), tokenize_raw(term) FROM unnest('{");
   for (int i=0; i < inputTermsSize; i++){
@@ -1878,7 +1878,7 @@ insert_batch(PG_FUNCTION_ARGS)
       cur += sprintf(cur, "%s", inputTerms[i]);;
     }
   }
-  cur += sprintf(cur, "}'::varchar(100)[]) AS term");
+  cur += sprintf(cur, "}'::varchar(100)[]) AS term WHERE NOT replace(term, ' ', '_') IN (SELECT word FROM %s)", tableNameNormalized);
   SPI_connect();
   ret = SPI_exec(command, 0);
   proc = SPI_processed;
@@ -1967,7 +1967,6 @@ insert_batch(PG_FUNCTION_ARGS)
   updateProductQuantizationRelation(nearestCentroids, tokens, cbPositions, cb, pqQuantizationTable, rawVectorsSize, NULL);
   // insert new terms + quantinzation for residuals
   updateProductQuantizationRelation(nearestResidualCentroids, tokens, cbrPositions, residualCb, tableNameFineQuantization, rawVectorsSize, cqQuantizations);
-
   // update codebook relation
   updateCodebookRelation(cb, cbPositions, cbCodes, tableNameCodebook, countIncs, subvectorSize);
   // update residual codebook relation

@@ -538,17 +538,17 @@ void updateProductQuantizationRelation(int** nearestCentroids, char** tokens, in
   char* command;
   char* cur;
   int ret;
-  const char* schema_pq_quantization = "(word, vector)";
-  const char* schema_fine_quantization = "(coarse_id, word, vector)";
+  const char* schema_pq_quantization = "(id, word, vector)";
+  const char* schema_fine_quantization = "(id, coarse_id, word, vector)";
 
   for (int i=0; i < rawVectorsSize; i++){
-    command = palloc(sizeof(char)*(100 + cbPositions*6 + 100));
+    command = palloc(sizeof(char)*(100 + cbPositions*6 + 200));
     cur = command;
     if (cqQuantizations == NULL){
-      cur += sprintf(cur, "INSERT INTO %s %s VALUES (", pqQuantizationTable, schema_pq_quantization);
+      cur += sprintf(cur, "INSERT INTO %s %s VALUES ((SELECT max(id) + 1 FROM %s), ", pqQuantizationTable, schema_pq_quantization, pqQuantizationTable);
       cur += sprintf(cur, "'%s', '{", tokens[i]);
     }else{
-      cur += sprintf(cur, "INSERT INTO %s %s VALUES (", pqQuantizationTable, schema_fine_quantization);
+      cur += sprintf(cur, "INSERT INTO %s %s VALUES ((SELECT max(id) + 1 FROM %s), ", pqQuantizationTable, schema_fine_quantization, pqQuantizationTable);
       cur += sprintf(cur, "%d, '%s', '{", cqQuantizations[i], tokens[i]);
     }
     for (int j = 0; j < cbPositions; j++){
@@ -560,13 +560,11 @@ void updateProductQuantizationRelation(int** nearestCentroids, char** tokens, in
     }
     cur += sprintf(cur, "}'");
     cur += sprintf(cur, ")");
-
     SPI_connect();
     ret = SPI_exec(command, 0);
     if (ret > 0){
       SPI_finish();
     }
-
     pfree(command);
   }
 }
@@ -576,9 +574,9 @@ void updateWordVectorsRelation(char* tableName, char** tokens, float** rawVector
   char* cur;
   int ret;
   for (int i=0; i < rawVectorsSize; i++){
-    command = palloc(sizeof(char)*(100 + vectorSize*10 + 100));
+    command = palloc(sizeof(char)*(100 + vectorSize*10 + 200));
     cur = command;
-    cur += sprintf(cur, "INSERT INTO %s (word, vector) VALUES ( '%s', '{", tableName, tokens[i]);
+    cur += sprintf(cur, "INSERT INTO %s (id, word, vector) VALUES ((SELECT max(id) + 1 FROM %s), '%s', '{", tableName, tableName, tokens[i]);
     for (int j = 0; j < vectorSize; j++){
       if (j < (vectorSize - 1)){
         cur += sprintf(cur, "%f,", rawVectors[i][j]);
