@@ -23,6 +23,11 @@ def get_query_set_full():
         ('pq search', 'SELECT word FROM k_nearest_neighbour_pq({!s}, {:d});'),
         ('ivfadc search', 'SELECT word FROM k_nearest_neighbour_ivfadc({!s}, {:d});')]
 
+def get_query_set_full_pv(factor):
+    return [('brute-force', 'SELECT v2.word FROM '+ VEC_TABLE_NAME + ' AS v2 ORDER BY cosine_similarity_norm({!s}, v2.vector) DESC FETCH FIRST {:d} ROWS ONLY'),
+        ('pq search', 'SELECT word FROM k_nearest_neighbour_pq_pv({!s}, {:d}, ' + str(factor) + ');'),
+        ('ivfadc search', 'SELECT word FROM k_nearest_neighbour_ivfadc_pv({!s}, {:d}, ' + str(factor) + ');')]
+
 def get_query_set_test():
     return [
         ('pq_search', 'SELECT * FROM pq_search({!s}, {:d}) AS (id integer, distance float4);'),
@@ -304,6 +309,12 @@ def main(argc, argv):
         time_values, responses = measurement(cur, con, get_query_set_full(), k, samples)
         precisions = calculate_precision(responses, responses['brute-force'])
         plot_bars(time_values)
+
+    if method == 'defaultpv':
+        time_values, responses = measurement(cur, con, get_query_set_full_pv(basis), k, samples)
+        precisions = calculate_precision(responses, responses['brute-force'])
+        plot_bars(time_values)
+
     if method == 'sizedependend':
         time_values_pq, time_values_exact, precisions = size_dependend_measurement(con, cur, k, samples, resolution, basis, data_size)
         plot_scatter_graphs_size_dep(time_values_exact, time_values_pq, precisions)
