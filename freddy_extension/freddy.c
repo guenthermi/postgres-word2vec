@@ -530,7 +530,7 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
     char* cur;
 
     TopK* topKs;
-    int* maxDists;
+    float* maxDists;
 
     // for coarse quantizer
     float minDist; // sufficient high value
@@ -590,7 +590,6 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
         cur += sprintf(cur, "%d)", queryIds[i]);
       }
     }
-
    ret = SPI_exec(command, 0);
    proc = SPI_processed;
    if (ret > 0 && SPI_tuptable != NULL){
@@ -628,7 +627,7 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
    bls = palloc(sizeof(Blacklist)*queryVectorsSize);
    cqIds = palloc(sizeof(int)*queryVectorsSize);
    querySimilarities = palloc(sizeof(float*)*queryVectorsSize);
-   maxDists = palloc(sizeof(int)*queryVectorsSize);
+   maxDists = palloc(sizeof(float)*queryVectorsSize);
    for (int i = 0; i < queryVectorsSize; i++){
      foundInstances[i] = 0;
      bls[i].isValid = false;
@@ -640,7 +639,6 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
      cqIds[i] = -1;
      maxDists[i] = 100;
    }
-
    end = clock();
    elog(INFO,"allocate memory time %f", (double) (end - start) / CLOCKS_PER_SEC);
 
@@ -739,7 +737,6 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
 
      end = clock();
      elog(INFO,"create command time %f", (double) (end - start) / CLOCKS_PER_SEC);
-
      ret = SPI_exec(command, 0);
      proc = SPI_processed;
      end = clock();
@@ -786,7 +783,6 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
      }
 
    }
-
     for (int i = 0; i < queryVectorsSize; i++){
       free(queryVectors[i]);
     }
@@ -953,7 +949,6 @@ pq_search_in(PG_FUNCTION_ARGS)
       }
     }
     cur += sprintf(cur, ")");
-
     ret = SPI_exec(command, 0);
     proc = SPI_processed;
     if (ret > 0 && SPI_tuptable != NULL){
