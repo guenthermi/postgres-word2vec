@@ -46,6 +46,13 @@ def get_query_set_ivfadc_pv(factors):
 def get_query_set_ivfadc_batch(size_values, dataset_size):
     return [(('ivfadc batch search', size), 'SELECT * FROM ivfadc_batch_search(' + serialize_ids(sample(range(1, dataset_size+1), size)) + ', {:d}) AS (id integer, target integer, squaredistance float4);') for size in size_values]
 
+def get_query_set_ivfadc_batch_precision(size_values, dataset_size):
+    ids = dict()
+    for size in size_values:
+        ids[size] = sample(range(1, dataset_size+1), size)
+    return [(('ivfadc batch search', size), 'SELECT * FROM ivfadc_batch_search(' + serialize_ids(ids[size]) + ', {:d}) AS (id integer, target integer, squaredistance float4);') for size in ids] + [(('exact', size), 'SELECT gv.id, gv2.id FROM '+ VEC_TABLE_NAME + ' as gv, '+ VEC_TABLE_NAME + ' AS gv2, k_nearest_neighbour(gv.vector, {:d}) as n WHERE (gv.id = ANY (' + serialize_ids(ids[size]) + ')) AND (gv2.word = n.word);') for size in ids]
+
+
 def get_exact_query_topkin(size_values, ids):
     return [(('brute-force', size), 'SELECT word FROM  knn_in({!s}, {:d}, ' + serialize_ids(ids[:size]) + ' );') for size in size_values]
 
@@ -124,6 +131,39 @@ def measurement_simple(cur, con, size_values, k, number, dataset_size):
             count += 1
             print('Iteration', count, 'completed')
     return time_values
+
+def measurement_batch_precision(cur, con, size_values, k, number, dataset_size):
+    time_values = {}
+    precisions = {}
+    count = 0
+    for i in range(number):
+        exact_results = {}
+        ivfadc_results = {}
+        for (name, query) in get_query_set_ivfadc_batch_precision(size_values, dataset_size):
+            if name[0] == 'exact':
+                rendered_query = query.format(k)
+                print('perform exact query')
+                cur.execute(rendered_query)
+                exact_results[name[1]] = cur.fetchall()
+                print('finished exact query')
+            else:
+                if not name in time_values:
+                    time_values[name] = []
+                rendered_query = query.format(k)
+                start = time.time()
+                cur.execute(rendered_query)
+                result = cur.fetchall()
+                end = time.time()
+                time_values[name].append((end-start))
+                count += 1
+                ivfadc_results[name[1]] = result
+                print('Iteration', count, 'completed')
+        for key in ivfadc_results:
+            ivfadc = set([(elem[0], elem[1]) for elem in ivfadc_results[key]])
+            exact = set(exact_results[key])
+            precisions[('ivfadc batch search', key)] = (len(ivfadc.intersection(exact)) / len(ivfadc))
+            # print(len(set([(ivfadc_results[key][0], elem[key][1] for elem in ])))
+    return time_values, precisions
 
 def calculate_precision(responses, exact, threshold=5):
     result = dict()
@@ -269,6 +309,11 @@ def batch_measurement(con, cur, k, resolution, basis, dataset_size, number):
     time_values = measurement_simple(cur, con, size_values, k, number, dataset_size)
     return time_values
 
+def batch_measurement_precision(con, cur, k, resolution, basis, dataset_size, number):
+    size_values = [basis*n + 1 for n in range(resolution)]
+    time_values = measurement_batch_precision(cur, con, size_values, k, number, dataset_size)
+    return time_values
+
 def main(argc, argv):
     global VEC_TABLE_NAME
     k = 5
@@ -331,6 +376,8 @@ def main(argc, argv):
         plot_scatter_graph_batch(time_values)
         for key in time_values.keys():
             precisions[key] = None
+    if method == 'batch-precision':
+        time_values, precisions = batch_measurement_precision(con, cur, k, resolution, basis, data_size, number)
 
 
     print('Parameters k:', k, 'Number of Queries:', number)
