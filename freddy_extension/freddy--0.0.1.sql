@@ -14,9 +14,17 @@ END
 $$
 LANGUAGE plpgsql;
 
-SELECT CASE (SELECT count(proname) FROM pg_proc WHERE proname='get_vecs_name')
-  WHEN 0 THEN init('google_vecs', 'google_vecs_norm', 'pq_quantization', 'pq_codebook', 'fine_quantization', 'coarse_quantization', 'residual_codebook')
-  END;
+DO $$
+DECLARE
+init_done int;
+number_tables int;
+BEGIN
+EXECUTE 'SELECT count(proname) FROM pg_proc WHERE proname=''get_vecs_name''' INTO init_done;
+EXECUTE 'SELECT count(*) FROM information_schema.tables WHERE table_schema=''public'' AND table_type=''BASE TABLE'' AND table_name in (''google_vecs'', ''google_vecs_norm'', ''pq_quantization'', ''pq_codebook'', ''fine_quantization'', ''coarse_quantization'', ''residual_codebook'')' INTO number_tables;
+IF init_done = 0 AND number_tables = 7 THEN
+  EXECUTE 'SELECT init(''google_vecs'', ''google_vecs_norm'', ''pq_quantization'', ''pq_codebook'', ''fine_quantization'', ''coarse_quantization'', ''residual_codebook'')';
+END IF;
+END$$;
 
 
 CREATE OR REPLACE FUNCTION cosine_similarity(float4[], float4[]) RETURNS float8
