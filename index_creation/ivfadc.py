@@ -179,9 +179,11 @@ def main(argc, argv):
     if (index_config.get_value('export_to_file')):
         index_data = dict({
             'words': words,
+            'cq': cq,
             'codebook': codebook,
             'index': index,
-            'counts': counts
+            'coarse_counts': coarse_counts,
+            'fine_counts': fine_counts
         })
         im.save_index(index_data, index_config.get_value('export_name'))
 

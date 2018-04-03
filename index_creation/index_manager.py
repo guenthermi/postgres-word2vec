@@ -3,11 +3,10 @@
 import pickle
 
 def load_index(filename):
-    f = open(filename)
-    self.data = pickle.load(f)
-    return self.data
+    f = open(filename, 'rb')
+    return pickle.load(f)
 
 def save_index(data, filename):
-    output = open(filename, 'w')
+    output = open(filename, 'wb')
     pickle.dump(data, output)
     return
