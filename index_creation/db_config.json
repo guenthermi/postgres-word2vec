@@ -1,0 +1,8 @@
+{
+	"username": "postgres",
+	"password": "postgres",
+	"host": "localhost",
+	"db_name": "imdb",
+	"batch_size": 50000,
+	"log": ""
+}

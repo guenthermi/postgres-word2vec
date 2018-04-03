@@ -8,30 +8,19 @@ import faiss
 import time
 import psycopg2
 
+from config import *
+from logger import *
 import index_utils as utils
+import index_manager as im
 
-STD_USER = 'postgres'
-STD_PASSWORD = 'postgres'
-STD_HOST = 'localhost'
-STD_DB_NAME = 'imdb'
-
-BATCH_SIZE = 50000
-
-PQ_TABLE_NAME = 'pq_quantization'
-CODEBOOK_TABLE_NAME = 'pq_codebook'
-
-PQ_INDEX_NAME = 'pq_quantization_word_idx'
-
-VEC_FILE_PATH = '../vectors/google_vecs.txt'
-
-def get_table_information():
-    return ((PQ_TABLE_NAME,"(id serial PRIMARY KEY, word varchar(100), vector int[])"),
-        (CODEBOOK_TABLE_NAME, "(id serial PRIMARY KEY, pos int, code int, vector float4[], count int)"))
+def get_table_information(index_config):
+    return ((index_config.get_value("pq_table_name"),"(id serial PRIMARY KEY, word varchar(100), vector int[])"),
+        (index_config.get_value("cb_table_name"), "(id serial PRIMARY KEY, pos int, code int, vector float4[], count int)"))
 
 
-def create_quantizer(vectors, m, centr_num, iterts=10):
+def create_quantizer(vectors, m, centr_num, logger, iterts=10):
     if len(vectors[0]) % m != 0:
-        print('Error d mod m != 0')
+        logger.log(Logger.ERROR, 'd mod m != 0')
         return
     result = centroids = []
     len_centr = int(len(vectors[0]) / m)
@@ -42,13 +31,13 @@ def create_quantizer(vectors, m, centr_num, iterts=10):
     for i in range(m):
         subvecs = [partitions[j][i] for j in range(len(partitions))]
         # apply k-means -> get maps id \to centroid for each partition (use scipy k-means)
-        print(subvecs[0])
+        logger.log(Logger.INFO, str(subvecs[0])) # TODO replace info
         centr_map, distortion = kmeans(subvecs, centr_num, iterts) # distortion is unused at the moment
         centroids.append(np.array(centr_map).astype('float32')) #  centr_map could be transformed into a real map (maybe not reasonable)
     return np.array(result) # list of lists of centroids
 
-def create_index_with_faiss(vectors, codebook):
-    print('len vectors', len(vectors))
+def create_index_with_faiss(vectors, codebook, logger):
+    logger.log(Logger.INFO, 'Length of vectors: ' + str(len(vectors)))
     result = []
     indices = []
     m = len(codebook)
@@ -56,7 +45,7 @@ def create_index_with_faiss(vectors, codebook):
     # create indices for codebook
     for i in range(m):
         index = faiss.IndexFlatL2(len_centr)
-        print(codebook[i])
+        logger.log(Logger.INFO, str(codebook[i])) # TODO replace info
         index.add(codebook[i])
         indices.append(index)
     count = 0
@@ -77,11 +66,11 @@ def create_index_with_faiss(vectors, codebook):
             result += codes
             batches = [[] for i in range(m)]
         if count % 1000 == 0:
-            print('appended', len(result), 'vectors')
-    print('appended', len(result), 'vectors')
+            logger.log(Logger.INFO, 'Appended ' + str(len(result)) + ' vectors')
+    logger.log(Logger.INFO, 'Appended ' + str(len(result)) + ' vectors')
     return result
 
-def create_index(vectors, codebook):
+def create_index(vectors, codebook, logger):
     result = []
     m = len(codebook)
     len_centr = int(len(vectors[0]) / m)
@@ -107,18 +96,18 @@ def create_index(vectors, codebook):
         count += 1
         result.append(code)
         if count % 100 == 0:
-            print('append', count, 'vectors')
+            logger.log(Logger.INFO, 'Appended ' + str(count) + ' vectors')
     return result
 
-def add_to_database(words, codebook, pq_quantization, counts, con, cur):
-    print('len words', len(words), 'len pq_quantization', len(pq_quantization))
+def add_to_database(words, codebook, pq_quantization, counts, con, cur, index_config, batch_size, logger):
+    logger.log(Logger.INFO, 'Length of words: ' + str(len(words)) + ' Length of pq_quantization: ' + str(len(pq_quantization)))
     # add codebook
     for pos in range(len(codebook)):
         values = []
         for i in range(len(codebook[pos])):
             output_vec = utils.serialize_vector(codebook[pos][i])
             values.append({"pos": pos, "code": i, "vector": output_vec, "count": counts[(pos, i)]})
-        cur.executemany("INSERT INTO "+ CODEBOOK_TABLE_NAME + " (pos,code,vector, count) VALUES (%(pos)s, %(code)s, %(vector)s, %(count)s)", tuple(values))
+        cur.executemany("INSERT INTO "+ index_config.get_value("cb_table_name") + " (pos,code,vector, count) VALUES (%(pos)s, %(code)s, %(vector)s, %(count)s)", tuple(values))
         con.commit()
 
     # add pq qunatization
@@ -126,10 +115,10 @@ def add_to_database(words, codebook, pq_quantization, counts, con, cur):
     for i in range(len(pq_quantization)):
         output_vec = utils.serialize_vector(pq_quantization[i])
         values.append({"word": words[i][:100], "vector": output_vec})
-        if (i % (BATCH_SIZE-1) == 0) or (i == (len(pq_quantization)-1)):
-            cur.executemany("INSERT INTO "+ PQ_TABLE_NAME + " (word,vector) VALUES (%(word)s, %(vector)s)", tuple(values))
+        if (i % (batch_size-1) == 0) or (i == (len(pq_quantization)-1)):
+            cur.executemany("INSERT INTO "+ index_config.get_value("pq_table_name") + " (word,vector) VALUES (%(word)s, %(vector)s)", tuple(values))
             con.commit()
-            print('Inserted', i+1, 'vectors')
+            logger.log(Logger.INFO, 'Inserted' + str(i+1) + ' vectors')
             values = []
     return
 
@@ -146,46 +135,49 @@ def determine_counts(codebook, pq_quantization):
     return result
 
 def main(argc, argv):
-    global VEC_FILE_PATH, PQ_TABLE_NAME, CODEBOOK_TABLE_NAME, PQ_INDEX_NAME
-    m = 12
-    k = 256
-    train_size = 100000
-    if argc > 1:
-        VEC_FILE_PATH = argv[1]
-    if argc > 3:
-        PQ_TABLE_NAME = argv[2]
-        CODEBOOK_TABLE_NAME = argv[3]
-    if argc > 4:
-        PQ_INDEX_NAME = argv[4]
-    if argc > 5:
-        m = int(argv[5])
-    if argc > 6:
-        k = int(argv[6])
-    print("m", m)
+    db_config = Configuration('db_config.json')
+    logger = Logger(db_config.get_value('log'))
+    if argc < 2:
+        logger.log(Logger.ERROR, 'Configuration file for index creation required')
+        return
+    index_config = Configuration(argv[1])
+
+    batch_size = db_config.get_value("batch_size")
+
     # 1) get vectors
-    words, vectors, vectors_size = utils.get_vectors(VEC_FILE_PATH)
-    print(vectors_size)
+    words, vectors, vectors_size = utils.get_vectors(index_config.get_value("vec_file_path"), logger)
+    logger.log(Logger.INFO, 'vectors_size : ' + str(vectors_size))
     # apply k-means -> get codebook
-    codebook = create_quantizer(vectors[:train_size], m, k)
+    codebook = create_quantizer(vectors[:index_config.get_value('train_size')], index_config.get_value('m'), index_config.get_value('k'), logger)
     # 5) create index with qunatizer
     start = time.time()
-    index = create_index_with_faiss(vectors[:vectors_size], codebook)
+    index = create_index_with_faiss(vectors[:vectors_size], codebook, logger)
     end = time.time()
-    print('finish index creation after', end - start, 'seconds')
+    logger.log(Logger.INFO, 'Finish index creation after ' + str(end - start) + ' seconds')
 
     counts = determine_counts(codebook, index)
 
-    # create db connection
-    try:
-        con = psycopg2.connect("dbname='" + STD_DB_NAME + "' user='" + STD_USER + "' host='" + STD_HOST + "' password='" + STD_PASSWORD + "'")
-    except:
-        print('Can not connect to database')
-        return
-    cur = con.cursor()
-    utils.init_tables(con, cur, get_table_information())
-    add_to_database(words, codebook, index, counts, con, cur)
+    # add to file
+    if (index_config.get_value('export_to_file')):
+        index_data = dict({
+            'words': words,
+            'codebook': codebook,
+            'index': index,
+            'counts': counts
+        })
+        im.save_index(index_data, index_config.get_value('export_name'))
+    if (index_config.get_value('add_to_database')):
+        # create db connection
+        try:
+            con = psycopg2.connect("dbname='" +  db_config.get_value('db_name') + "' user='" +  db_config.get_value('username') + "' host='" +  db_config.get_value('host') + "' password='" +  db_config.get_value('password') + "'")
+        except:
+            logger.log(Logger.ERROR, 'Can not connect to database')
+            return
+        cur = con.cursor()
+        utils.init_tables(con, cur, get_table_information(index_config), logger)
+        add_to_database(words, codebook, index, counts, con, cur, index_config, batch_size, logger)
 
-    utils.create_index(PQ_TABLE_NAME, PQ_INDEX_NAME, 'word', con, cur)
+        utils.create_index(index_config.get_value("pq_table_name"), index_config.get_value("pq_index_name"), 'word', con, cur, logger)
 
 if __name__ == "__main__":
 	main(len(sys.argv), sys.argv)

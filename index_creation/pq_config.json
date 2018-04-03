@@ -1,0 +1,12 @@
+{
+  "m": 12,
+  "k": 256,
+  "train_size": 100000,
+  "pq_table_name": "pq_quantization",
+  "cb_table_name": "pq_codebook",
+  "pq_index_name": "pq_quantization_word_idx",
+  "vec_file_path": "../vectors/google_vecs.txt",
+  "add_to_database": true,
+  "export_to_file": false,
+  "export_name": ""
+}
