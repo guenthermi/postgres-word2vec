@@ -12,6 +12,7 @@ import psycopg2
 from config import *
 from logger import *
 import index_utils as utils
+import index_manager as im
 
 def get_table_information(index_config):
     return ((index_config.get_value('coarse_table_name'),"(id serial PRIMARY KEY, vector float4[], count int)"),
@@ -22,7 +23,7 @@ def create_coarse_quantizer(vectors, centr_num, iters=10):
     centr_map, distortion = kmeans(vectors, centr_num, iters)
     return np.array(centr_map)
 
-def create_fine_quantizer(cq, vectors, m, centr_num, iterts=10):
+def create_fine_quantizer(cq, vectors, m, centr_num, logger, iterts=10):
     if len(vectors[0]) % m != 0:
         logger.log(Logger.ERROR, 'd mod m != 0')
         return
@@ -48,7 +49,7 @@ def create_fine_quantizer(cq, vectors, m, centr_num, iterts=10):
         centroids.append(np.array(centr_map).astype('float32')) #  centr_map could be transformed into a real map (maybe not reasonable)
     return np.array(result) # list of lists of centroids
 
-def create_index_with_faiss(vectors, cq, codebook):
+def create_index_with_faiss(vectors, cq, codebook, logger):
     logger.log(Logger.INFO, 'len of vectors ' + str(len(vectors)))
     result = []
     indices = []
@@ -87,7 +88,7 @@ def create_index_with_faiss(vectors, cq, codebook):
 
         time1 = time.time()
         for i in range(m):
-            if (time.time - time1) > 60:
+            if (time.time() - time1) > 60:
                 logger.log(Logger.INFO, 'vec ' + str(vec) + ' i ' +  str(i) +  ' m ' + str(m) + ' count ' + str(count))
                 time1 += 100000
             batches[i].append(partition[i])
@@ -110,7 +111,7 @@ def create_index_with_faiss(vectors, cq, codebook):
     logger.log(Logger.INFO, 'Appended ' + str(len(result)) + ' vectors')
     return result, coarse_counts, fine_counts
 
-def add_to_database(words, cq, codebook, pq_quantization, coarse_counts, fine_counts, con, cur, index_config, batch_size):
+def add_to_database(words, cq, codebook, pq_quantization, coarse_counts, fine_counts, con, cur, index_config, batch_size, logger):
     logger.log(Logger.INFO, 'Length of words: ' + str(len(words)) + ' Length of pq_quantization: ' + str(len(pq_quantization)))
     # add codebook
     for pos in range(len(codebook)):
@@ -161,17 +162,17 @@ def main(argc, argv):
 
     # get vectors
     words, vectors, vectors_size = utils.get_vectors(index_config.get_value('vec_file_path'), logger)
-    logger.log(logger.INFO, 'vectors_size :' + vectors_size)
+    logger.log(logger.INFO, 'vectors_size :' + str(vectors_size))
 
     # create coarse quantizer
     cq = create_coarse_quantizer(vectors[:train_size_coarse], centr_num_coarse)
 
     # calculate codebook based on residuals
-    codebook = create_fine_quantizer(cq, vectors[:train_size_fine], m, k)
+    codebook = create_fine_quantizer(cq, vectors[:train_size_fine], m, k, logger)
 
     # create index with qunatizers
     start = time.time()
-    index, coarse_counts, fine_counts = create_index_with_faiss(vectors[:vectors_size], cq, codebook)
+    index, coarse_counts, fine_counts = create_index_with_faiss(vectors[:vectors_size], cq, codebook, logger)
     end = time.time()
     logger.log(logger.INFO, 'Finish index creation after ' + str(end - start) + ' seconds')
 
@@ -196,9 +197,9 @@ def main(argc, argv):
             return
         cur = con.cursor()
 
-        utils.init_tables(con, cur, get_table_information(), logger)
+        utils.init_tables(con, cur, get_table_information(index_config), logger)
 
-        add_to_database(words, cq, codebook, index, coarse_counts, fine_counts, con, cur, batch_size)
+        add_to_database(words, cq, codebook, index, coarse_counts, fine_counts, con, cur, index_config, batch_size, logger)
 
         utils.create_index(index_config.get_value('fine_table_name'), index_config.get_value('fine_word_index_name'), 'word', con, cur, logger)
         utils.create_index(index_config.get_value('fine_table_name'), index_config.get_value('fine_coarse_index_name'), 'coarse_id', con, cur, logger)

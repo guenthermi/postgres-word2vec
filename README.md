@@ -118,3 +118,13 @@ After all index tables are created, you might execute `CREATE EXTENSION freddy;`
 ```
 SELECT init('google_vecs', 'google_vecs_norm', 'pq_quantization', 'pq_codebook', 'fine_quantization', 'coarse_quantization', 'residual_codebook')
 ```
+
+## Store and load index files
+
+The index creation scripts "pq_index.py" and "ivfadc.py" are able to store index structures into binary files. To enable the generation of these binary files, change the `export_to_file` flag in the JSON config file to `true` and define an output destination by setting `export_name` to the export path.
+
+To load an index file into the database you have to use the "load_index.py" script. The script requires an index file, the type of the index (either "pq" or "ivfadc") and the JSON file for the index configuration (same file as used for creating an index). Use the following command to create an pq-index stored in a "dump.idx" file:
+
+```
+python3 load_index.py dump.idx pq pq_config.json
+```

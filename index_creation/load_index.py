@@ -27,9 +27,9 @@ def add_to_database(db_config, index_config, type, data, logger):
         utils.create_index(index_config.get_value("pq_table_name"), index_config.get_value("pq_index_name"), 'word', con, cur, logger)
 
     elif type == 'ivfadc':
-        utils.init_tables(con, cur, ivfadc.get_table_information(), logger)
+        utils.init_tables(con, cur, ivfadc.get_table_information(index_config), logger)
 
-        ivfadc.add_to_database(data['words'], data['cq'], data['codebook'], data['index'], data['coarse_counts'], data['fine_counts'], con, cur, db_config.get_value('batch_size'))
+        ivfadc.add_to_database(data['words'], data['cq'], data['codebook'], data['index'], data['coarse_counts'], data['fine_counts'], con, cur, index_config, db_config.get_value('batch_size'), logger)
 
         utils.create_index(index_config.get_value('fine_table_name'), index_config.get_value('fine_word_index_name'), 'word', con, cur, logger)
         utils.create_index(index_config.get_value('fine_table_name'), index_config.get_value('fine_coarse_index_name'), 'coarse_id', con, cur, logger)
@@ -45,6 +45,7 @@ def main(argc, argv):
     index_config = None
     if argc < 4:
         print(HELP_TEXT)
+        return
     else:
         index_file = argv[1]
         index_type = argv[2]
