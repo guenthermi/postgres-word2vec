@@ -89,7 +89,7 @@ void shuffle(int* input, int* output, int inputSize, int outputSize){
   int i;
   int j;
   int t;
-  int* tmp = malloc(sizeof(int)*inputSize);
+  int* tmp = palloc(sizeof(int)*inputSize);
   srand(time(0));
 
   for (i = 0; i < inputSize; i++){
@@ -105,7 +105,6 @@ void shuffle(int* input, int* output, int inputSize, int outputSize){
   for (i = 0; i < outputSize; i++){
     output[i] = tmp[i];
   }
-  free(tmp);
 }
 
 CoarseQuantizer getCoarseQuantizer(int* size){
@@ -123,7 +122,7 @@ CoarseQuantizer getCoarseQuantizer(int* size){
   ret = SPI_exec(command, 0);
   proc = SPI_processed;
   *size = proc;
-  result = malloc(proc * sizeof(CoarseQuantizerEntry));
+  result = SPI_palloc(proc * sizeof(CoarseQuantizerEntry));
   if (ret > 0 && SPI_tuptable != NULL){
     TupleDesc tupdesc = SPI_tuptable->tupdesc;
     SPITupleTable *tuptable = SPI_tuptable;
@@ -152,7 +151,7 @@ CoarseQuantizer getCoarseQuantizer(int* size){
       deconstruct_array(vectorAt, eltype, typlen, typbyval, typalign, &data, &nulls, &n);
 
       result[i].id = DatumGetInt32(id);
-      result[i].vector = malloc(n*sizeof(float));
+      result[i].vector = SPI_palloc(n*sizeof(float));
       for (int j=0; j< n; j++){
         result[i].vector[j] = DatumGetFloat4(data[j]);
       }
@@ -174,7 +173,7 @@ Codebook getCodebook(int* positions, int* codesize, char* tableName){
 
   ret = SPI_exec(command, 0);
   proc = SPI_processed;
-  result = malloc(proc * sizeof(CodebookEntry));
+  result = SPI_palloc(proc * sizeof(CodebookEntry));
   if (ret > 0 && SPI_tuptable != NULL){
     TupleDesc tupdesc = SPI_tuptable->tupdesc;
     SPITupleTable *tuptable = SPI_tuptable;
@@ -209,7 +208,7 @@ Codebook getCodebook(int* positions, int* codesize, char* tableName){
 
       result[i].pos = DatumGetInt32(pos);
       result[i].code = DatumGetInt32(code);
-      result[i].vector = malloc(n*sizeof(float));
+      result[i].vector = SPI_palloc(n*sizeof(float));
       for (int j=0; j< n; j++){
         result[i].vector[j] = DatumGetFloat4(data[j]);
       }
@@ -233,7 +232,7 @@ CodebookWithCounts getCodebookWithCounts(int* positions, int* codesize, char* ta
 
   ret = SPI_exec(command, 0);
   proc = SPI_processed;
-  result = malloc(proc * sizeof(CodebookEntryComplete));
+  result = SPI_palloc(proc * sizeof(CodebookEntryComplete));
   if (ret > 0 && SPI_tuptable != NULL){
     TupleDesc tupdesc = SPI_tuptable->tupdesc;
     SPITupleTable *tuptable = SPI_tuptable;
@@ -271,7 +270,7 @@ CodebookWithCounts getCodebookWithCounts(int* positions, int* codesize, char* ta
 
       result[i].pos = DatumGetInt32(pos);
       result[i].code = DatumGetInt32(code);
-      result[i].vector = malloc(n*sizeof(float));
+      result[i].vector = SPI_palloc(n*sizeof(float));
       for (int j=0; j< n; j++){
         result[i].vector[j] = DatumGetFloat4(data[j]);
       }
@@ -284,20 +283,6 @@ CodebookWithCounts getCodebookWithCounts(int* positions, int* codesize, char* ta
   *codesize += 1;
 
   return result;
-}
-
-void freeCodebook(Codebook cb, int size){
-  for (int i = 0; i < size; i++){
-    free(cb[i].vector);
-  }
-  free(cb);
-}
-
-void freeCodebookWithCounts(CodebookWithCounts cb, int size){
-  for (int i = 0; i < size; i++){
-    free(cb[i].vector);
-  }
-  free(cb);
 }
 
 WordVectors getVectors(char* tableName, int* ids, int idsSize){
@@ -316,8 +301,8 @@ WordVectors getVectors(char* tableName, int* ids, int idsSize){
 
   WordVectors result;
 
-  result.vectors = malloc(sizeof(float*)*idsSize);
-  result.ids = malloc(sizeof(int)*idsSize);
+  result.vectors = palloc(sizeof(float*)*idsSize);
+  result.ids = palloc(sizeof(int)*idsSize);
 
   SPI_connect();
 
@@ -355,7 +340,7 @@ WordVectors getVectors(char* tableName, int* ids, int idsSize){
       eltype = ARR_ELEMTYPE(vectorAt);
       get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
       deconstruct_array(vectorAt, eltype, typlen, typbyval, typalign, &data, &nulls, &n);
-      result.vectors[i] = malloc(sizeof(float)*n);
+      result.vectors[i] = SPI_palloc(sizeof(float)*n);
       result.ids[i] = wordId;
       for (int j = 0; j < n; j++){
         result.vectors[i][j] = DatumGetFloat4(data[j]);
@@ -365,14 +350,6 @@ WordVectors getVectors(char* tableName, int* ids, int idsSize){
   SPI_finish();
 
   return result;
-}
-
-void freeWordVectors(WordVectors vectors, int size){
-  for (int i = 0; i < size; i++){
-    free(vectors.vectors[i]);
-  }
-  free(vectors.vectors);
-  free(vectors.ids);
 }
 
 void getArray(ArrayType* input, Datum** result, int* n){
@@ -432,7 +409,7 @@ char **split(const char *str, char sep)
 {
     char **array;
     unsigned int start = 0, stop, toks = 0, t;
-    token *tokens = malloc((strlen(str) + 1) * sizeof(token));
+    token *tokens = palloc((strlen(str) + 1) * sizeof(token));
     for (stop = 0; str[stop]; stop++) {
         if (str[stop] == sep) {
             tokens[toks].start = str + start;
@@ -445,7 +422,7 @@ char **split(const char *str, char sep)
     tokens[toks].start = str + start;
     tokens[toks].len = stop - start;
     toks++;
-    array = malloc((toks + 1) * sizeof(char*));
+    array = palloc((toks + 1) * sizeof(char*));
     for (t = 0; t < toks; t++) {
         /* Calloc makes it nul-terminated */
         char *token = calloc(tokens[t].len + 1, 1);
@@ -454,7 +431,6 @@ char **split(const char *str, char sep)
     }
     /* Add a sentinel */
     array[t] = NULL;
-    free(tokens);
     return array;
 }
 
