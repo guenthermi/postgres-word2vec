@@ -5,34 +5,23 @@ import psycopg2
 import time
 import numpy as np
 
+from config import *
+from logger import *
 import index_utils as utils
 
-STD_USER = 'postgres'
-STD_PASSWORD = 'postgres'
-STD_HOST = 'localhost'
-
-BATCH_SIZE = 50000
-
-VEC_TABLE_NAME = 'google_vecs_norm'
-VEC_INDEX_NAME = 'google_vecs_norm_word_idx'
-
-VEC_FILE_PATH = '../vectors/google_vecs.txt'
-
-NORMALIZED = True
-
-def init_tables(con, cur):
+def init_tables(con, cur, table_name, logger):
     # drop old table
-    query_clear = "DROP TABLE IF EXISTS " + VEC_TABLE_NAME + ";"
+    query_clear = "DROP TABLE IF EXISTS " + table_name + ";"
     result = cur.execute(query_clear)
     con.commit()
-    print('Exexuted DROP TABLE on ', VEC_TABLE_NAME)
+    logger.log(Logger.INFO, 'Exexuted DROP TABLE on ' + table_name)
 
     # create table
-    query_create_table = "CREATE TABLE " + VEC_TABLE_NAME + " (id serial PRIMARY KEY, word varchar(100), vector float4[]);"
-    result = cur.execute(cur.mogrify(query_create_table, (VEC_TABLE_NAME,)))
+    query_create_table = "CREATE TABLE " + table_name + " (id serial PRIMARY KEY, word varchar(100), vector float4[]);"
+    result = cur.execute(cur.mogrify(query_create_table, (table_name,)))
     # commit changes
     con.commit()
-    print('Created new table', VEC_TABLE_NAME)
+    logger.log(Logger.INFO, 'Created new table ' + table_name)
 
     return
 
@@ -42,7 +31,6 @@ def serialize_array(array):
         try:
             val = float(elem)
         except:
-            # print('Could not serialize', elem, 'in', array)
             return None
         output += str(elem) + ','
     return output[:-1] + '}'
@@ -53,7 +41,6 @@ def serialize_as_norm_array(array):
         try:
             vector.append(float(elem))
         except:
-            # print('Could not serialize', elem, 'in', array)
             return None
     output = '{'
     length = np.linalg.norm(vector)
@@ -61,7 +48,7 @@ def serialize_as_norm_array(array):
         output += str(elem / length) + ','
     return output[:-1] + '}'
 
-def insert_vectors(filename, con, cur):
+def insert_vectors(filename, con, cur, table_name, batch_size, normalized, logger):
     f = open(filename)
     (_, size) = f.readline().split()
     d = int(size)
@@ -71,70 +58,64 @@ def insert_vectors(filename, con, cur):
     while line:
         splits = line.split()
         vector = None
-        if NORMALIZED:
+        if normalized:
             vector = serialize_as_norm_array(splits[1:])
         else:
             vector = serialize_array(splits[1:])
         if (len(splits[0]) < 100) and (vector != None) and (len(splits) == (d + 1)):
             values.append({"word": splits[0], "vector": vector})
         else:
-            print('WARNING: parsing problem with ', line)
+            logger.log(Logger.WARNING, 'parsing problem with ' + line)
             count -= 1
-        if count % BATCH_SIZE == 0:
-            cur.executemany("INSERT INTO "+ VEC_TABLE_NAME + " (word,vector) VALUES (%(word)s, %(vector)s)", tuple(values))
+        if count % batch_size == 0:
+            cur.executemany("INSERT INTO "+ table_name + " (word,vector) VALUES (%(word)s, %(vector)s)", tuple(values))
             con.commit()
-            print('Inserted', count-1, 'vectors')
+            logger.log(Logger.INFO, 'Inserted ' + str(count-1) + ' vectors')
             values = []
 
         count+= 1
         line = f.readline()
 
-    cur.executemany("INSERT INTO "+ VEC_TABLE_NAME + " (word,vector) VALUES (%(word)s, %(vector)s)", tuple(values))
+    cur.executemany("INSERT INTO "+ table_name + " (word,vector) VALUES (%(word)s, %(vector)s)", tuple(values))
     con.commit()
-    print('Inserted', count-1, 'vectors')
+    logger.log(Logger.INFO, 'Inserted ' + str(count-1) + ' vectors')
     values = []
 
     return
 
 def main(argc, argv):
-    global VEC_TABLE_NAME
-    global VEC_INDEX_NAME
-    global NORMALIZED
 
-    if argc < 3:
-        print('Please provide the database name and filename')
+    db_config = Configuration('db_config.json')
+    logger = Logger(db_config.get_value('log'))
+
+    if argc < 2:
+        logger.log(Logger.ERROR, 'Configuration file for index creation required')
         return
-    db_name = argv[1]
-    filename = argv[2]
+    vec_config = Configuration(argv[1])
 
-    if argc > 3:
-        VEC_TABLE_NAME = argv[3]
-    if argc > 4:
-        VEC_INDEX_NAME = argv[4]
-    if argc > 5:
-        NORMALIZED = (int(argv[5]) == 1)
+    user = db_config.get_value('username')
+    password = db_config.get_value('password')
+    host = db_config.get_value('host')
+    db_name = db_config.get_value('db_name')
 
-    user = STD_USER
-    password = STD_PASSWORD
-    host = STD_HOST
     # init db connection
     try:
         con = psycopg2.connect("dbname='" + db_name + "' user='" + user + "' host='" + host + "' password='" + password + "'")
     except:
-        print('Can not connect to database')
+        logger.log(Logger.ERROR, 'Can not connect to database')
         return
 
     cur = con.cursor()
 
-    init_tables(con, cur)
+    init_tables(con, cur, vec_config.get_value('table_name'), logger)
 
-    insert_vectors(filename, con, cur)
+    insert_vectors(vec_config.get_value('vec_file_path'), con, cur, vec_config.get_value('table_name'), db_config.get_value('batch_size'), vec_config.get_value('normalized'), logger)
 
     # commit changes
     con.commit()
 
     # create index
-    utils.create_index(VEC_TABLE_NAME, VEC_INDEX_NAME, 'word', con, cur)
+    utils.create_index(vec_config.get_value('table_name'), vec_config.get_value('index_name'), 'word', con, cur, logger)
 
     # close connection
     con.close()

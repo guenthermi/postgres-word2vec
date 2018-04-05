@@ -2,22 +2,17 @@
 
 import numpy as np
 
-PQ_TABLE_NAME = 'pq_quantization'
-CODEBOOK_TABLE_NAME = 'pq_codebook'
+from logger import *
 
-# TABLE_INFORMATION = ((PQ_TABLE_NAME,"(id serial PRIMARY KEY, word varchar(100), vector int[])"),
-#     (CODEBOOK_TABLE_NAME, "(id serial PRIMARY KEY, pos int, code int, vector float4[])"))
-
-
-def get_vectors(filename, max_count=10**9, normalization=True):
+def get_vectors(filename, logger, max_count=10**9, normalization=True):
     f = open(filename)
     line_splits = f.readline().split()
-    print(line_splits)
+    logger.log(Logger.INFO, str(line_splits))
     size = int(line_splits[0])
     d = int(line_splits[1])
     words, vectors, count = [],np.zeros((size, d)).astype('float32'), 0
-    print(count)
-    print(line_splits)
+    logger.log(Logger.INFO, str(count))
+    logger.log(Logger.INFO, str(line_splits))
     while (line_splits) and (count < max_count):
         line = f.readline()
         line_splits = line.split()
@@ -33,12 +28,12 @@ def get_vectors(filename, max_count=10**9, normalization=True):
             words.append(word)
             count += 1
         else:
-            print('Can not decode the following line: ', line);
+            logger.log(Logger.INFO, 'Can not decode the following line: ' + str(line));
         if count % 10000 == 0:
-            print('INFO read', count, 'vectors')
+            logger.log(Logger.INFO, 'INFO read ' + str(count) + ' vectors')
     return words, vectors, count
 
-def init_tables(con, cur, table_information):
+def init_tables(con, cur, table_information, logger):
     query_drop = "DROP TABLE IF EXISTS "
     for (name, schema) in table_information:
         query_drop += (" " + name + ",")
@@ -51,7 +46,7 @@ def init_tables(con, cur, table_information):
         result = cur.execute(query_create_table)
         # commit changes
         con.commit()
-        print('Created new table', name)
+        logger.log(Logger.INFO, 'Created new table ' + str(name))
     return
 
 def serialize_vector(vec):
@@ -60,11 +55,11 @@ def serialize_vector(vec):
         output_vec += str(elem) + ','
     return output_vec[:-1] + '}'
 
-def create_index(table_name, index_name, column_name, con, cur):
+def create_index(table_name, index_name, column_name, con, cur, logger):
     query_drop = "DROP INDEX IF EXISTS " + index_name + ";"
     result = cur.execute(query_drop)
     con.commit()
     query_create_index = "CREATE INDEX " + index_name + " ON " +  table_name + " (" + column_name + ");"
     cur.execute(query_create_index)
     con.commit()
-    print('Created index', index_name, 'on table', table_name, 'for column', column_name)
+    logger.log(Logger.INFO, 'Created index ' + str(index_name) + ' on table ' + str(table_name) + ' for column ' + str(column_name))

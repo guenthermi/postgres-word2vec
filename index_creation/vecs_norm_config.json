@@ -1,0 +1,6 @@
+{
+  "table_name": "google_vecs_norm",
+  "index_name": "google_vecs_norm_word_idx",
+  "vec_file_path": "../vectors/google_vecs.txt",
+  "normalized": true
+}
