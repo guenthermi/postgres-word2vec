@@ -83,6 +83,23 @@ We implemented two types of index structures to accelerate word embedding operat
 
 <!-- ![time measurement](evaluation/time_measurment.png) -->
 
+## Post verification
+
+The results of kNN queries could be improved by using post verification. The idea behind this is to obtain a larger result set with a approximated kNN search (more then k results) and run an exact search on the results afterwards.
+
+To use postverification within a search process, use `k_nearest_neighbour_pq_pv` and `k_nearest_neighbour_ivfadc_pv`.
+
+**Example**
+```
+SELECT m.title, t.word, t.squaredistance
+FROM movies AS m, k_nearest_neighbour_ivfadc_pv(m.title, 3, 500) AS t
+ORDER BY m.title ASC, t.squaredistance DESC;
+```
+
+The effect of post verification on the response time and the precision of the results is shown below.
+
+![post verification](evaluation/time_measurment.png)
+
 ## Setup
 At first, you need to set up a [Postgres server](https://www.postgresql.org/). You have to install [faiss](https://github.com/facebookresearch/faiss) and a few other python libraries to run the import scripts.
 
