@@ -203,8 +203,6 @@ pq_search(PG_FUNCTION_ARGS)
     end = clock();
     elog(INFO,"calculate distances time %f", (double) (end - start) / CLOCKS_PER_SEC);
 
-    freeCodebook(cb,cbPositions * cbCodes);
-
     usrfctx = (UsrFctx*) palloc (sizeof (UsrFctx));
     usrfctx -> tk = topK;
     usrfctx -> k = k;
@@ -438,9 +436,6 @@ ivfadc_search(PG_FUNCTION_ARGS)
 
     }
 
-    freeCodebook(residualCb,cbPositions * cbCodes);
-    free(cq);
-
     usrfctx = (UsrFctx*) palloc (sizeof (UsrFctx));
     usrfctx -> tk = topK;
     usrfctx -> k = k;
@@ -596,8 +591,8 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
      TupleDesc tupdesc = SPI_tuptable->tupdesc;
      SPITupleTable *tuptable = SPI_tuptable;
      queryVectorsSize = proc;
-     queryVectors = malloc(sizeof(float*)*queryVectorsSize);
-     idArray = malloc(sizeof(int)*queryVectorsSize);
+     queryVectors = SPI_palloc(sizeof(float*)*queryVectorsSize);
+     idArray = SPI_palloc(sizeof(int)*queryVectorsSize);
      for (int i = 0; i < proc; i++){
        Datum id;
        Datum vector;
@@ -609,7 +604,7 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
        idArray[i] = DatumGetInt32(id);
        getArray(DatumGetArrayTypeP(vector), &data, &n);
        queryDim = n;
-       queryVectors[i] = malloc(queryDim*sizeof(float));
+       queryVectors[i] = SPI_palloc(queryDim*sizeof(float));
        for (int j = 0; j < queryDim; j++){
          queryVectors[i][j] = DatumGetFloat4(data[j]);
        }
@@ -783,14 +778,8 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
      }
 
    }
-    for (int i = 0; i < queryVectorsSize; i++){
-      free(queryVectors[i]);
-    }
-    free(queryVectors);
-    freeCodebook(residualCb,cbPositions * cbCodes);
-    free(cq);
 
-    // TODO tokKs ausgeben
+    // return tokKs
     usrfctx = (UsrFctxBatch*) palloc (sizeof (UsrFctxBatch));
     usrfctx -> tk = topKs;
     usrfctx -> k = k;
@@ -824,7 +813,6 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
   // return results
   if (usrfctx->iter >= usrfctx->k * usrfctx->queryIdsSize){
       SRF_RETURN_DONE (funcctx);
-      free(usrfctx -> queryIds);
       elog(INFO, "deleted it");
   }else{
     Datum result;
@@ -999,7 +987,6 @@ pq_search_in(PG_FUNCTION_ARGS)
 
     }
 
-    freeCodebook(cb,cbPositions * cbCodes);
   }
   funcctx = SRF_PERCALL_SETUP ();
   usrfctx = (UsrFctx*) funcctx -> user_fctx;
@@ -1021,12 +1008,6 @@ pq_search_in(PG_FUNCTION_ARGS)
 
   }
 
-}
-
-int free_hashmap_entry(any_t item, any_t data){
-  free((char*) item);
-  free((float*) data);
-  return MAP_OK;
 }
 
 PG_FUNCTION_INFO_V1(pq_search_in_cplx);
@@ -1150,8 +1131,8 @@ pq_search_in_cplx(PG_FUNCTION_ARGS)
         char* word;
         Datum vector;
         Datum* data;
-        char* wordText = malloc(sizeof(char)* 100);
-        float* distancePointer = malloc(sizeof(float));
+        char* wordText = SPI_palloc(sizeof(char)* 100);
+        float* distancePointer = SPI_palloc(sizeof(float));
 
         HeapTuple tuple = tuptable->vals[i];
         word = SPI_getvalue(tuple, tupdesc, 1);
@@ -1190,16 +1171,7 @@ pq_search_in_cplx(PG_FUNCTION_ARGS)
       }
 
       // free hashmap
-      hashmap_iterate(mymap, free_hashmap_entry);
       hashmap_free(mymap);
-
-
-      for (int i = 0; i < inputTermsSize; i++){
-        for (int j = 0; inputTerms[i][j]; j++){
-          free(inputTerms[i][j]);
-        }
-        free(inputTerms[i]);
-      }
 
       usrfctx = (UsrFctxCplx*) palloc (sizeof (UsrFctxCplx));
       usrfctx -> tk = topK;
@@ -1221,7 +1193,6 @@ pq_search_in_cplx(PG_FUNCTION_ARGS)
 
     }
 
-    freeCodebook(cb,cbPositions * cbCodes);
   }
   funcctx = SRF_PERCALL_SETUP ();
   usrfctx = (UsrFctxCplx*) funcctx -> user_fctx;
@@ -1303,7 +1274,6 @@ cluster_pq(PG_FUNCTION_ARGS)
     char* tableName;
     char* tableNameCodebook = palloc(sizeof(char)*100);
     char* tableNamePqQuantization = palloc(sizeof(char)*100);
-
     getTableName(CODEBOOK, tableNameCodebook, 100);
     getTableName(PQ_QUANTIZATION, tableNamePqQuantization, 100);
 
@@ -1317,7 +1287,6 @@ cluster_pq(PG_FUNCTION_ARGS)
     relationCounts = palloc(sizeof(int)*k);
 
     nearestCentroid = palloc(sizeof(int)*(DATASET_SIZE+1));
-
     // read ids from function args
     getArray(PG_GETARG_ARRAYTYPE_P(0), &idsData, &n);
 
@@ -1331,16 +1300,13 @@ cluster_pq(PG_FUNCTION_ARGS)
       elog(ERROR, "|ids| < k");
       SRF_RETURN_DONE (funcctx);
     }
-
     // get pq codebook
     cb = getCodebook(&cbPositions, &cbCodes, tableNameCodebook);
-
     subvectorSize = vectorSize / cbPositions;
 
     // choose initial km-centroid randomly
     kmCentroidIds = palloc(sizeof(int)*k);
     shuffle(inputIds, kmCentroidIds, inputIdsSize, k);
-
     // get vectors for ids
     tableName = palloc(sizeof(char)*100);
 
@@ -1352,7 +1318,6 @@ cluster_pq(PG_FUNCTION_ARGS)
     for (int i = 0; i < k; i++){
       kmCentroidsNew[i] = palloc(sizeof(float)*vectorSize);
     }
-
 
     for (int iteration = 0; iteration < iterations; iteration++){
 
@@ -1472,8 +1437,6 @@ cluster_pq(PG_FUNCTION_ARGS)
       }
     }
 
-    freeWordVectors(idVectors, k);
-
     usrfctx = (UsrFctxCluster*) palloc (sizeof (UsrFctxCluster));
     usrfctx -> ids = inputIds;
     usrfctx -> size = inputIdsSize;
@@ -1493,7 +1456,6 @@ cluster_pq(PG_FUNCTION_ARGS)
     funcctx -> slot = slot;
     attinmeta = TupleDescGetAttInMetadata (outtertupdesc);
     funcctx -> attinmeta = attinmeta;
-
     MemoryContextSwitchTo (oldcontext);
 
   }
@@ -1628,7 +1590,7 @@ grouping_pq(PG_FUNCTION_ARGS)
     }
     cur += sprintf(cur, ") ORDER BY id ASC");
 
-    groupVecs = malloc(sizeof(float*)*n);
+    groupVecs = SPI_palloc(sizeof(float*)*n);
     groupVecsSize = n;
 
     ret = SPI_exec(command, 0);
@@ -1647,7 +1609,7 @@ grouping_pq(PG_FUNCTION_ARGS)
         groupVector = SPI_getbinval(tuple, tupdesc, 2, &info);
         getArray(DatumGetArrayTypeP(groupVector), &dataGroupVector, &n);
         vectorSize = n; // one asignment would be enough...
-        groupVecs[i] = malloc(sizeof(float)*vectorSize);
+        groupVecs[i] = SPI_palloc(sizeof(float)*vectorSize);
         for (int j = 0; j < vectorSize; j++){
           groupVecs[i][j] = DatumGetFloat4(dataGroupVector[j]);
         }
@@ -1733,11 +1695,6 @@ grouping_pq(PG_FUNCTION_ARGS)
       }
       SPI_finish();
     }
-
-    for (int i = 0; i < groupVecsSize; i++){
-      free(groupVecs[i]);
-    }
-    free(groupVecs);
 
     usrfctx = (UsrFctxGrouping*) palloc (sizeof (UsrFctxGrouping));
     usrfctx -> ids = inputIds;
@@ -1878,9 +1835,9 @@ insert_batch(PG_FUNCTION_ARGS)
   ret = SPI_exec(command, 0);
   proc = SPI_processed;
   rawVectorsSize = proc;
-  rawVectors = malloc(sizeof(float*)*proc);
-  rawVectorsUnnormalized = malloc(sizeof(float*)*proc);
-  tokens = malloc(sizeof(char*)*proc);
+  rawVectors = SPI_palloc(sizeof(float*)*proc);
+  rawVectorsUnnormalized = SPI_palloc(sizeof(float*)*proc);
+  tokens = SPI_palloc(sizeof(char*)*proc);
   if (ret > 0 && SPI_tuptable != NULL){
     TupleDesc tupdesc = SPI_tuptable->tupdesc;
     SPITupleTable *tuptable = SPI_tuptable;
@@ -1897,14 +1854,14 @@ insert_batch(PG_FUNCTION_ARGS)
       token = SPI_getvalue(tuple, tupdesc, 1);
       vector = SPI_getbinval(tuple, tupdesc, 2, &info);
       vectorUnnormalized = SPI_getbinval(tuple, tupdesc, 3, &info);
-      tokens[i] = malloc(sizeof(char)* 100); // maybe replace with strlen(token)+1 when using TEXT data type
+      tokens[i] = SPI_palloc(sizeof(char)* 100); // maybe replace with strlen(token)+1 when using TEXT data type
 
       snprintf(tokens[i], strlen(token)+1, "%s", token);
       getArray(DatumGetArrayTypeP(vector), &dataVector, &n);
       getArray(DatumGetArrayTypeP(vectorUnnormalized), &dataVectorUnnormlized, &n);
       vectorSize = n;
-      rawVectors[i] = malloc(sizeof(float)*vectorSize);
-      rawVectorsUnnormalized[i] = malloc(sizeof(float)*vectorSize);
+      rawVectors[i] = SPI_palloc(sizeof(float)*vectorSize);
+      rawVectorsUnnormalized[i] = SPI_palloc(sizeof(float)*vectorSize);
       for (int j= 0; j < vectorSize; j++){
         rawVectors[i][j] = DatumGetFloat4(dataVector[j]);
         rawVectorsUnnormalized[i][j] = DatumGetFloat4(dataVectorUnnormlized[j]);
@@ -1912,7 +1869,6 @@ insert_batch(PG_FUNCTION_ARGS)
     }
     SPI_finish();
   }
-  pfree(command);
 
   // determine quantization and count increments
 
@@ -1928,7 +1884,7 @@ insert_batch(PG_FUNCTION_ARGS)
   // determine coarse quantization and residuals
   cqQuantizations = palloc(sizeof(int)*rawVectorsSize);
   nearestCoarseCentroidRaw = NULL;
-  residuals = malloc(sizeof(float*)*rawVectorsSize);
+  residuals = palloc(sizeof(float*)*rawVectorsSize);
 
   for (int i = 0; i < rawVectorsSize; i++){
     minDistCoarse = 100;
@@ -1940,7 +1896,7 @@ insert_batch(PG_FUNCTION_ARGS)
         minDistCoarse = dist;
       }
     }
-    residuals[i] = malloc(sizeof(float)*vectorSize);
+    residuals[i] = palloc(sizeof(float)*vectorSize);
     for (int j = 0; j < vectorSize; j++){
       residuals[i][j] = rawVectors[i][j] - nearestCoarseCentroidRaw[j];
     }
@@ -1948,14 +1904,14 @@ insert_batch(PG_FUNCTION_ARGS)
 
   // determine nearest centroids (quantization)
   nearestCentroids = palloc(sizeof(int*)*rawVectorsSize);
-  countIncs = malloc(cbPositions*cbCodes*sizeof(int));
+  countIncs = palloc(cbPositions*cbCodes*sizeof(int));
   subvectorSize = vectorSize / cbPositions;
 
   updateCodebook(rawVectors, rawVectorsSize, subvectorSize, cb, cbPositions, cbCodes, nearestCentroids, countIncs);
 
   nearestResidualCentroids = palloc(sizeof(int*)*rawVectorsSize);
   residualSubvectorSize = vectorSize / cbrPositions;
-  residualCountIncs = malloc(cbrPositions*cbrCodes*sizeof(int));
+  residualCountIncs = palloc(cbrPositions*cbrCodes*sizeof(int));
   updateCodebook(residuals, rawVectorsSize, residualSubvectorSize, residualCb, cbrPositions, cbrCodes, nearestResidualCentroids, residualCountIncs);
 
   // insert new terms + quantinzation
@@ -1969,23 +1925,6 @@ insert_batch(PG_FUNCTION_ARGS)
 
   updateWordVectorsRelation(tableNameNormalized, tokens, rawVectors, rawVectorsSize, vectorSize);
   updateWordVectorsRelation(tableNameOriginal, tokens, rawVectorsUnnormalized, rawVectorsSize, vectorSize);
-
-  for (int i = 0; i < rawVectorsSize; i++){
-      free(rawVectors[i]);
-      free(rawVectorsUnnormalized[i]);
-      free(tokens[i]);
-      free(residuals[i]);
-  }
-  free(rawVectors);
-  free(rawVectorsUnnormalized);
-  free(tokens);
-  free(countIncs);
-  freeCodebookWithCounts(cb,cbPositions*cbCodes);
-
-  freeCodebookWithCounts(residualCb, cbrPositions*cbrCodes);
-  free(cq);
-  free(residualCountIncs);
-  free(residuals);
 
   PG_RETURN_INT32(0);
 

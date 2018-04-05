@@ -75,13 +75,7 @@ Codebook getCodebook(int* positions, int* codesize, char* tableName);
 
 CodebookWithCounts getCodebookWithCounts(int* positions, int* codesize, char* tableName);
 
-void freeCodebook(Codebook cb, int size);
-
-void freeCodebookWithCounts(CodebookWithCounts cb, int size);
-
 WordVectors getVectors(char* tableName, int* ids, int idsSize);
-
-void freeWordVectors(WordVectors vectors, int size);
 
 void getArray(ArrayType* input, Datum** result, int* n);
 
