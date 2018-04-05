@@ -98,7 +98,19 @@ ORDER BY m.title ASC, t.squaredistance DESC;
 
 The effect of post verification on the response time and the precision of the results is shown below.
 
-![post verification](evaluation/time_measurment.png)
+![post verification](evaluation/postverification.png)
+
+## Batchwise search
+It is possible to execute multiple ivfadc search queries in batches. Therefore you can use the `k_nearest_neighbour_ivfadc_batch` function. This accelerate the calculation. In general the response time per query drops down with increasing batch size.
+
+**Example**
+```
+SELECT *
+FROM k_nearest_neighbour_ivfadc_batch(ARRAY(SELECT title FROM movies), 3);
+```
+The response time per query in dependence of the batch size is shown below.
+
+ ![batch queries](evaluation/batch_queries.png)
 
 ## Setup
 At first, you need to set up a [Postgres server](https://www.postgresql.org/). You have to install [faiss](https://github.com/facebookresearch/faiss) and a few other python libraries to run the import scripts.
