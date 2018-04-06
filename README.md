@@ -115,12 +115,20 @@ The response time per query in dependence of the batch size is shown below.
 ## Setup
 At first, you need to set up a [Postgres server](https://www.postgresql.org/). You have to install [faiss](https://github.com/facebookresearch/faiss) and a few other python libraries to run the import scripts.
 
-To build the extension you have to switch to the "word2vec_extension" folder. Here you can run `sudo make install` to build the shared library and install the extension into the Postgres server. Hereafter you can add the extension in PSQL by running `CREATE EXTENSION freddy;`
+To build the extension you have to switch to the "freddy_extension" folder. Here you can run `sudo make install` to build the shared library and install the extension into the Postgres server. Hereafter you can add the extension in PSQL by running `CREATE EXTENSION freddy;`
 
 ## Index creation
-To use the extension you have to provide word embeddings. The recommendation here is the [word2vec dataset from google news](https://drive.google.com/file/d/0B7XkCwpI5KDYNlNUTTlSS21pQmM/edit?usp=sharing). The scripts for the index creation process are in the "index_creation" folder. You have to download the dataset and put it into the "vectors" folder. After that, you can transform it into a text format by running the "transform_vecs.py" script.
+To use the extension you have to provide word embeddings. The recommendation here is the [word2vec dataset from google news](https://drive.google.com/file/d/0B7XkCwpI5KDYNlNUTTlSS21pQmM/edit?usp=sharing). The scripts for the index creation process are in the "index_creation" folder. You have to download the dataset and put it into a "vectors" folder, which should be created in the root folder in the repository. After that, you can transform it into a text format by running the "transform_vecs.py" script.
 
-Then you can fill the database with the vectors with the vec2database.py. However, at first, you need to provide information like database name, username, password etc. Therefore you have to change the properties in the "db_config.json" file.
+```
+mkdir vectors
+wget -c "https://s3.amazonaws.com/dl4j-distribution/GoogleNews-vectors-negative300.bin.gz" -P vectors
+gzip --decompress vectors/GoogleNews-vectors-negative300.bin.gz
+cd index_creation
+python3 transform_vecs.py
+```
+
+Then you can fill the database with the vectors with the "vec2database.py" script. However, at first, you need to provide information like database name, username, password etc. Therefore you have to change the properties in the "db_config.json" file.
 
 After that, you can use the "vec2database.py" script to add the word vectors to the database. You might have to adopt the configuration files "word_vecs.json" and "word_vecs_norm.json" for the word vector tables.
 Execute the following code (this can take a while):
