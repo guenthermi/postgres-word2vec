@@ -10,6 +10,8 @@ class Logger:
         ERROR: 'ERROR'
     }
 
+    # TODO option to filter messages according to there log level
+
     def __init__(self, filename='log.out'):
         self.filename = filename
         if filename == "":

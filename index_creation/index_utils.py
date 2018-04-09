@@ -1,6 +1,7 @@
 #!/bin/python3
 
 import numpy as np
+import psycopg2
 
 from logger import *
 
@@ -54,6 +55,14 @@ def serialize_vector(vec):
     for elem in vec:
         output_vec += str(elem) + ','
     return output_vec[:-1] + '}'
+
+def disable_triggers(con, cur):
+    cur.execute('ALTER TABLE fine_quantization_test DISABLE trigger ALL;')
+    con.commit();
+
+def enable_triggers(con, cur):
+    cur.execute('ALTER TABLE fine_quantization_test ENABLE trigger ALL;')
+    con.commit();
 
 def create_index(table_name, index_name, column_name, con, cur, logger):
     query_drop = "DROP INDEX IF EXISTS " + index_name + ";"
