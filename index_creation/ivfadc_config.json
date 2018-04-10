@@ -11,6 +11,7 @@
   "fine_coarse_index_name": "fine_quantization_coarse_id_idx",
   "vec_file_path": "../vectors/google_vecs.txt",
   "add_to_database": true,
-  "export_to_file": false,
-  "export_name": ""
+  "export_filename": "",
+  "pipeline": false,
+  "export_pipeline_data": ""
 }

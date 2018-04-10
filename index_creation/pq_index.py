@@ -99,7 +99,7 @@ def add_to_database(words, codebook, pq_quantization, counts, con, cur, index_co
         if (i % (batch_size-1) == 0) or (i == (len(pq_quantization)-1)):
             cur.executemany("INSERT INTO "+ index_config.get_value("pq_table_name") + " (word,vector) VALUES (%(word)s, %(vector)s)", tuple(values))
             con.commit()
-            logger.log(Logger.INFO, 'Inserted' + str(i+1) + ' vectors')
+            logger.log(Logger.INFO, 'Inserted ' + str(i+1) + ' vectors')
             values = []
     return
 
@@ -180,9 +180,13 @@ def main(argc, argv):
 
 
     # create index with qunatizer
+    use_pipeline = False
+    if index_config.has_key('pipeline'):
+        use_pipeline = index_config.get_value('pipeline')
 
     # singel cycle
-    if not USE_PIPELINE_APPROACH:
+    if not use_pipeline:
+        logger.log(logger.INFO, 'Start index creation (single cycle)')
         start = time.time()
         index = create_index_with_faiss(vectors[:vectors_size], codebook, logger)
         end = time.time()
@@ -191,23 +195,24 @@ def main(argc, argv):
         counts = determine_counts(codebook, index)
 
         # add to file
-        if (index_config.get_value('export_to_file')):
+        if (index_config.get_value('export_filename')):
             index_data = dict({
                 'words': words,
                 'codebook': codebook,
                 'index': index,
                 'counts': counts
             })
-            im.save_index(index_data, index_config.get_value('export_name'))
+            im.save_index(index_data, index_config.get_value('export_filename'))
 
         if (index_config.get_value('add_to_database')):
             add_to_database(words, codebook, index, counts, con, cur, index_config, batch_size, logger)
-
+            logger.log(logger.INFO, 'Create database index structures')
             utils.create_index(index_config.get_value("pq_table_name"), index_config.get_value("pq_index_name"), 'word', con, cur, logger)
             utils.enable_triggers(con, cur)
 
     # pipeline approach
-    if USE_PIPELINE_APPROACH:
+    if use_pipeline:
+        logger.log(logger.INFO, 'Start index creation (pipeline)')
         start = time.time()
         feeder = VectorFeeder(vectors[:vectors_size], words)
         m = len(codebook)
@@ -215,8 +220,8 @@ def main(argc, argv):
         calculation = PQIndexCreator(codebook, m, len_centr, logger)
         counts = dict()
         output_file = None
-        if (index_config.get_value('export_to_file')):
-            output_file = open(index_config.get_value('export_to_file'), 'wb')
+        if (index_config.get_value('export_pipeline_data')):
+            output_file = open(index_config.get_value('export_pipeline_data'), 'wb')
         while (feeder.has_next()):
             # calculate
             batch, word_batch = feeder.get_next_batch(batch_size)
@@ -225,13 +230,13 @@ def main(argc, argv):
             if (index_config.get_value('add_to_database')):
                 add_batch_to_database(word_batch, entries, con, cur, index_config, batch_size, logger)
                 logger.log(logger.INFO, 'Added ' + str(feeder.get_cursor() - batch_size + len(batch)) + ' vectors to the database')
-            if (index_config.get_value('export_to_file')):
+            if (index_config.get_value('export_pipeline_data')):
                 index_batch = dict({
                     'words': word_batch,
                     'index': entries,
                 })
                 pickle.dump(index_batch, output_file)
-                f = open(index_config.get_value('export_to_file')+'.tmp', 'wb')
+                f = open(index_config.get_value('export_pipeline_data')+'.tmp', 'wb')
                 pickle.dump(counts, f)
                 f.close()
                 logger.log(logger.INFO, 'Processed ' + str(feeder.get_cursor() - batch_size + len(batch)) + ' vectors')
@@ -241,6 +246,8 @@ def main(argc, argv):
             # add codebook to database
             add_codebook_to_database(codebook, counts, con, cur, index_config)
             logger.log(Logger.INFO, 'Added codebook entries into database')
+            logger.log(logger.INFO, 'Create database index structures')
+            utils.create_index(index_config.get_value("pq_table_name"), index_config.get_value("pq_index_name"), 'word', con, cur, logger)
             utils.enable_triggers(con, cur)
 
 if __name__ == "__main__":

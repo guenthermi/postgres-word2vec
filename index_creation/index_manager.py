@@ -19,14 +19,14 @@ def save_index(data, filename):
 
 def load_pipeline_ivfadc_index(filename_data, filename_counts, filename_cq, filename_codebook):
     counts = _load_file(filename_counts)
-    cq = _laod_file(filename_cq)
+    cq = _load_file(filename_cq)
     cb = _load_file(filename_codebook)
 
     # collect index data
     words = []
     index = []
     data_file = open(filename_data, 'rb')
-    while (true):
+    while (True):
         try:
             batch = pickle.load(data_file)
             words += batch['words']
@@ -51,7 +51,7 @@ def load_pipeline_pq_index(filename_data, filename_counts, filename_codebook):
     words = []
     index = []
     data_file = open(filename_data, 'rb')
-    while (true):
+    while (True):
         try:
             batch = pickle.load(data_file)
             words += batch['words']
@@ -61,7 +61,7 @@ def load_pipeline_pq_index(filename_data, filename_counts, filename_codebook):
 
     return {
         'words': words,
-        'codebook': codebook,
+        'codebook': cb,
         'index': index,
         'counts': counts
     }

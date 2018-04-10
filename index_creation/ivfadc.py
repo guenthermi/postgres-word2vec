@@ -130,7 +130,6 @@ def add_cq_to_database(cq, coarse_counts, con, cur, index_config):
     return
 
 def add_to_database(words, cq, codebook, pq_quantization, coarse_counts, fine_counts, con, cur, index_config, batch_size, logger):
-    logger.log(Logger.INFO, 'Length of words: ' + str(len(words)) + ' Length of pq_quantization: ' + str(len(pq_quantization)))
     # add codebook
     add_codebook_to_database(codebook, fine_counts, con, cur, index_config)
 
@@ -223,15 +222,19 @@ def main(argc, argv):
         utils.disable_triggers(con, cur)
 
     # create index with quantizers
+    use_pipeline = False
+    if index_config.has_key('pipeline'):
+        use_pipeline = index_config.get_value('pipeline')
 
     # single cycle
-    if not USE_PIPELINE_APPROACH:
+    if not use_pipeline:
+        logger.log(logger.INFO, 'Start index creation (single cycle)')
         start = time.time()
         index, coarse_counts, fine_counts = create_index_with_faiss(vectors[:vectors_size], cq, codebook, logger)
         end = time.time()
         logger.log(logger.INFO, 'Finish index creation after ' + str(end - start) + ' seconds')
         # add to file
-        if (index_config.get_value('export_to_file')):
+        if (index_config.get_value('export_filename')):
             index_data = dict({
                 'words': words,
                 'cq': cq,
@@ -240,18 +243,19 @@ def main(argc, argv):
                 'coarse_counts': coarse_counts,
                 'fine_counts': fine_counts
             })
-            im.save_index(index_data, index_config.get_value('export_name'))
+            im.save_index(index_data, index_config.get_value('export_filename'))
 
         if (index_config.get_value('add_to_database')):
 
             add_to_database(words, cq, codebook, index, coarse_counts, fine_counts, con, cur, index_config, batch_size, logger)
-
+            logger.log(logger.INFO, 'Create database index structures')
             utils.create_index(index_config.get_value('fine_table_name'), index_config.get_value('fine_word_index_name'), 'word', con, cur, logger)
-            utils.create_index(index_config.get_value('coarse_table_name'), index_config.get_value('fine_coarse_index_name'), 'coarse_id', con, cur, logger)
+            utils.create_index(index_config.get_value('fine_table_name'), index_config.get_value('fine_coarse_index_name'), 'coarse_id', con, cur, logger)
             utils.enable_triggers(con, cur)
 
     # pipeline approach
-    if USE_PIPELINE_APPROACH:
+    if use_pipeline:
+        logger.log(logger.INFO, 'Start index creation (pipeline)')
         start = time.time()
         feeder = VectorFeeder(vectors[:vectors_size], words)
         m = len(codebook)
@@ -260,8 +264,8 @@ def main(argc, argv):
         fine_counts = dict()
         coarse_counts = dict()
         output_file = None
-        if (index_config.get_value('export_to_file')):
-            output_file = open(index_config.get_value('export_to_file'), 'wb')
+        if (index_config.get_value('export_pipeline_data')):
+            output_file = open(index_config.get_value('export_pipeline_data'), 'wb')
         while (feeder.has_next()):
             # calculate
             batch, word_batch = feeder.get_next_batch(batch_size)
@@ -271,7 +275,7 @@ def main(argc, argv):
                 # add to database
                 add_batch_to_database(word_batch, entries, con, cur, index_config, batch_size, logger)
                 logger.log(logger.INFO, 'Added ' + str(feeder.get_cursor() - batch_size + len(batch)) + ' vectors to the database')
-            if (index_config.get_value('export_to_file')):
+            if (index_config.get_value('export_pipeline_data')):
                 # write to file
                 index_batch = dict({
                     'words': word_batch,
@@ -282,11 +286,10 @@ def main(argc, argv):
                     'fine_counts': fine_counts
                 })
                 pickle.dump(index_batch, output_file)
-                f = open(index_config.get_value('export_to_file')+'.tmp', 'wb')
+                f = open(index_config.get_value('export_pipeline_data')+'.tmp', 'wb')
                 pickle.dump(count_data, f)
                 f.close()
                 logger.log(logger.INFO, 'Processed ' + str(feeder.get_cursor() - batch_size + len(batch)) + ' vectors')
-                logger.log(logger.INFO, 'Last word: ' + str(word_batch[-1]) + ' last pqs: ' + str(batch[-1]))
         if output_file:
             output_file.close()
         if (index_config.get_value('add_to_database')):
@@ -295,6 +298,9 @@ def main(argc, argv):
             logger.log(Logger.INFO, 'Added residual codebook entries into database')
             add_cq_to_database(cq, coarse_counts, con, cur, index_config)
             logger.log(Logger.INFO, 'Added coarse quantizer entries into database')
+            logger.log(logger.INFO, 'Create database index structures')
+            utils.create_index(index_config.get_value('fine_table_name'), index_config.get_value('fine_word_index_name'), 'word', con, cur, logger)
+            utils.create_index(index_config.get_value('fine_table_name'), index_config.get_value('fine_coarse_index_name'), 'coarse_id', con, cur, logger)
             utils.enable_triggers(con, cur)
 
         end = time.time()
