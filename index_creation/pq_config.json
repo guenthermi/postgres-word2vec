@@ -8,6 +8,6 @@
   "vec_file_path": "../vectors/google_vecs.txt",
   "add_to_database": true,
   "export_pipeline_data": "",
-  "export_filename":,
+  "export_filename":"",
   "pipeline": false
 }
