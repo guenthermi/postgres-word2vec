@@ -8,3 +8,5 @@ class Configuration:
         self.data = json.loads(f.read())
     def get_value(self, key):
         return self.data[key]
+    def has_key(self, key):
+        return key in self.data

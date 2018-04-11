@@ -7,6 +7,7 @@
   "pq_index_name": "pq_quantization_word_idx",
   "vec_file_path": "../vectors/google_vecs.txt",
   "add_to_database": true,
-  "export_to_file": false,
-  "export_name": ""
+  "export_pipeline_data": "",
+  "export_filename":,
+  "pipeline": false
 }
