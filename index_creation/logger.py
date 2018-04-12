@@ -1,5 +1,11 @@
 #!/usr/bin/python3
 
+import sys
+import time
+import datetime
+
+TIME_STAMPS = True
+
 class Logger:
 
     LEVELS = INFO, WARNING, ERROR = range(3)
@@ -22,12 +28,13 @@ class Logger:
             self.dest_file = open(filename, 'w')
             self.stdout = False
             self.fileout = True
+            self.stderr = f
     def set_stdout(self, valid):
         self.stdout = valid
     def set_fileout(self, valid):
         self.fileouot = valid
     def log(self, level, message):
-        output = Logger.LEVEL_NAMES[level] + ": " + message + '\n'
+        output = Logger.LEVEL_NAMES[level] + (' [' + str(datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')) + '] ' if TIME_STAMPS else '') + ': ' + message + '\n'
         if self.stdout:
             print(output)
         if self.fileout:

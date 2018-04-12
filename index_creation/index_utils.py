@@ -11,7 +11,7 @@ def get_vectors(filename, logger, max_count=10**9, normalization=True):
     logger.log(Logger.INFO, str(line_splits))
     size = int(line_splits[0])
     d = int(line_splits[1])
-    words, vectors, count = [],np.zeros((size, d)).astype('float32'), 0
+    words, vectors, count = [],np.zeros((size, d), dtype='float32'), 0
     logger.log(Logger.INFO, str(count))
     logger.log(Logger.INFO, str(line_splits))
     while (line_splits) and (count < max_count):
@@ -56,12 +56,12 @@ def serialize_vector(vec):
         output_vec += str(elem) + ','
     return output_vec[:-1] + '}'
 
-def disable_triggers(con, cur):
-    cur.execute('ALTER TABLE fine_quantization_test DISABLE trigger ALL;')
+def disable_triggers(table_name, con, cur):
+    cur.execute('ALTER TABLE ' + table_name + ' DISABLE trigger ALL;')
     con.commit();
 
-def enable_triggers(con, cur):
-    cur.execute('ALTER TABLE fine_quantization_test ENABLE trigger ALL;')
+def enable_triggers(table_name, con, cur):
+    cur.execute('ALTER TABLE ' + table_name + ' ENABLE trigger ALL;')
     con.commit();
 
 def create_index(table_name, index_name, column_name, con, cur, logger):

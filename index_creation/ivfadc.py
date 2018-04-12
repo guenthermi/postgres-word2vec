@@ -219,7 +219,7 @@ def main(argc, argv):
         cur = con.cursor()
 
         utils.init_tables(con, cur, get_table_information(index_config), logger)
-        utils.disable_triggers(con, cur)
+        utils.disable_triggers(index_config.get_value('fine_table_name'),con, cur)
 
     # create index with quantizers
     use_pipeline = False
@@ -251,7 +251,7 @@ def main(argc, argv):
             logger.log(logger.INFO, 'Create database index structures')
             utils.create_index(index_config.get_value('fine_table_name'), index_config.get_value('fine_word_index_name'), 'word', con, cur, logger)
             utils.create_index(index_config.get_value('fine_table_name'), index_config.get_value('fine_coarse_index_name'), 'coarse_id', con, cur, logger)
-            utils.enable_triggers(con, cur)
+            utils.enable_triggers(index_config.get_value('fine_table_name'), con, cur)
 
     # pipeline approach
     if use_pipeline:
@@ -301,7 +301,7 @@ def main(argc, argv):
             logger.log(logger.INFO, 'Create database index structures')
             utils.create_index(index_config.get_value('fine_table_name'), index_config.get_value('fine_word_index_name'), 'word', con, cur, logger)
             utils.create_index(index_config.get_value('fine_table_name'), index_config.get_value('fine_coarse_index_name'), 'coarse_id', con, cur, logger)
-            utils.enable_triggers(con, cur)
+            utils.enable_triggers(index_config.get_value('fine_table_name'), con, cur)
 
         end = time.time()
 
