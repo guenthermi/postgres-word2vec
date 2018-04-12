@@ -87,6 +87,14 @@ CREATE OR REPLACE FUNCTION read_bytea(bytea) RETURNS integer[]
 AS '$libdir/freddy', 'read_bytea'
 LANGUAGE C IMMUTABLE STRICT;
 
+CREATE OR REPLACE FUNCTION read_bytea_float(bytea) RETURNS float4[]
+AS '$libdir/freddy', 'read_bytea_float'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION vec_to_bytea(anyarray) RETURNS bytea
+AS '$libdir/freddy', 'vec_to_bytea'
+LANGUAGE C IMMUTABLE STRICT;
+
 CREATE OR REPLACE FUNCTION k_nearest_neighbour(token varchar(100), k integer) RETURNS TABLE (word varchar(100), similarity float8) AS $$
 DECLARE
 table_name varchar;
