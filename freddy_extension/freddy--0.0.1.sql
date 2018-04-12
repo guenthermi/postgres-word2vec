@@ -83,6 +83,10 @@ CREATE OR REPLACE FUNCTION centroid(anyarray) RETURNS anyarray
 AS '$libdir/freddy', 'centroid'
 LANGUAGE C IMMUTABLE STRICT;
 
+CREATE OR REPLACE FUNCTION read_bytea(bytea) RETURNS integer[]
+AS '$libdir/freddy', 'read_bytea'
+LANGUAGE C IMMUTABLE STRICT;
+
 CREATE OR REPLACE FUNCTION k_nearest_neighbour(token varchar(100), k integer) RETURNS TABLE (word varchar(100), similarity float8) AS $$
 DECLARE
 table_name varchar;

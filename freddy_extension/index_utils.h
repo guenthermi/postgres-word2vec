@@ -93,4 +93,6 @@ void updateWordVectorsRelation(char* tableName, char** tokens, float** rawVector
 
 int compare (const void * a, const void * b);
 
+void convert_bytea_int32(bytea* bstring, int32** output, int32* size);
+
 #endif /*INDEX_UTILS_H*/

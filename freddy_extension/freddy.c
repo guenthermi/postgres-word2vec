@@ -1929,3 +1929,48 @@ insert_batch(PG_FUNCTION_ARGS)
   PG_RETURN_INT32(0);
 
 }
+
+PG_FUNCTION_INFO_V1(read_bytea);
+
+Datum
+read_bytea(PG_FUNCTION_ARGS)
+{
+
+  typedef struct{
+      int16       elmlen;
+      bool        elmbyval;
+      char        elmalign;
+      Oid         elmtype;
+  } elm_info; // TODO define this in some header file
+
+  bytea *data = PG_GETARG_BYTEA_P(0);
+  int32* out;
+
+  int size = 0;
+
+  ArrayType* v;
+  Datum* dvalues;
+  int dims[1];
+  int lbs[1];
+  elm_info info;
+
+  convert_bytea_int32(data, &out, &size);
+  elog(INFO, "size: %d", size);
+  elog(INFO, "0: %d", out[0]);
+
+  dvalues = (Datum*) palloc(sizeof(Datum)*size);
+  for (int i = 0; i < size; i++){
+    dvalues[i] = Int32GetDatum(out[i]);
+  }
+
+  dims[0] = size;
+  lbs[0] = 1;
+
+  info.elmtype = INT4OID;
+  get_typlenbyvalalign(info.elmtype, &info.elmlen, &info.elmbyval,  &info.elmalign);
+
+  v = construct_md_array(dvalues, NULL, 1, dims, lbs, info.elmtype, info.elmlen, info.elmbyval, info.elmalign);
+
+  PG_RETURN_ARRAYTYPE_P(v);
+
+}

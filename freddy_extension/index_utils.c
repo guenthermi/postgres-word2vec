@@ -575,3 +575,12 @@ void updateWordVectorsRelation(char* tableName, char** tokens, float** rawVector
 int compare (const void * a, const void * b) {
    return ( *(int*)a - *(int*)b );
 }
+
+void convert_bytea_int32(bytea* bstring, int32** output, int* size){
+  int32 *ptr = (int32 *) VARDATA(bstring);
+  if (*size == 0){ // if size value is given it is assumed that memory is already allocated
+    *output = palloc((VARSIZE(bstring) - VARHDRSZ));
+    *size = (VARSIZE(bstring) - VARHDRSZ) / sizeof(int32);
+  }
+  memcpy(*output, ptr, (*size)*sizeof(int32));
+}
