@@ -1929,3 +1929,132 @@ insert_batch(PG_FUNCTION_ARGS)
   PG_RETURN_INT32(0);
 
 }
+
+PG_FUNCTION_INFO_V1(read_bytea);
+
+Datum
+read_bytea(PG_FUNCTION_ARGS)
+{
+
+  typedef struct{
+      int16       elmlen;
+      bool        elmbyval;
+      char        elmalign;
+      Oid         elmtype;
+  } elm_info; // TODO define this in some header file
+
+  bytea *data = PG_GETARG_BYTEA_P(0);
+  int32* out;
+
+  int size = 0;
+
+  ArrayType* v;
+  Datum* dvalues;
+  int dims[1];
+  int lbs[1];
+  elm_info info;
+
+  convert_bytea_int32(data, &out, &size);
+
+  dvalues = (Datum*) palloc(sizeof(Datum)*size);
+  for (int i = 0; i < size; i++){
+    dvalues[i] = Int32GetDatum(out[i]);
+  }
+
+  dims[0] = size;
+  lbs[0] = 1;
+
+  info.elmtype = INT4OID;
+  get_typlenbyvalalign(info.elmtype, &info.elmlen, &info.elmbyval,  &info.elmalign);
+
+  v = construct_md_array(dvalues, NULL, 1, dims, lbs, info.elmtype, info.elmlen, info.elmbyval, info.elmalign);
+
+  PG_RETURN_ARRAYTYPE_P(v);
+
+}
+
+PG_FUNCTION_INFO_V1(read_bytea_float);
+
+Datum
+read_bytea_float(PG_FUNCTION_ARGS)
+{
+
+  typedef struct{
+      int16       elmlen;
+      bool        elmbyval;
+      char        elmalign;
+      Oid         elmtype;
+  } elm_info; // TODO define this in some header file
+
+  bytea *data = PG_GETARG_BYTEA_P(0);
+  float4* out;
+
+  int size = 0;
+
+  ArrayType* v;
+  Datum* dvalues;
+  int dims[1];
+  int lbs[1];
+  elm_info info;
+
+  convert_bytea_float4(data, &out, &size);
+
+  dvalues = (Datum*) palloc(sizeof(Datum)*size);
+  for (int i = 0; i < size; i++){
+    dvalues[i] = Float4GetDatum(out[i]);
+  }
+
+  dims[0] = size;
+  lbs[0] = 1;
+
+  info.elmtype = FLOAT4OID;
+  get_typlenbyvalalign(info.elmtype, &info.elmlen, &info.elmbyval,  &info.elmalign);
+
+  v = construct_md_array(dvalues, NULL, 1, dims, lbs, info.elmtype, info.elmlen, info.elmbyval, info.elmalign);
+
+  PG_RETURN_ARRAYTYPE_P(v);
+
+}
+
+PG_FUNCTION_INFO_V1(vec_to_bytea);
+
+Datum
+vec_to_bytea(PG_FUNCTION_ARGS)
+{
+
+  bytea * out;
+
+  Datum* vectorData;
+  int n = 0;
+  ArrayType* array = PG_GETARG_ARRAYTYPE_P(0);
+  Oid eltype = ARR_ELEMTYPE(array);
+
+  getArray(array, &vectorData, &n);
+
+  switch(eltype) {
+    case FLOAT4OID:
+      {
+        float4* vector;
+        vector = palloc(n*sizeof(float4));
+        for (int j=0; j< n; j++){
+          vector[j] = DatumGetFloat4(vectorData[j]);
+        }
+        convert_float4_bytea(vector, &out, n);
+      }
+      break;
+    case INT4OID:
+      {
+        int32* vector = palloc(n*sizeof(int32));;
+        for (int j=0; j< n; j++){
+          vector[j] = DatumGetInt32(vectorData[j]);
+        }
+        convert_int32_bytea(vector, &out, n);
+      }
+      break;
+    default:
+      elog(ERROR, "Unknown element type: %d", (int) eltype);
+  }
+
+  PG_RETURN_BYTEA_P(out);
+
+}

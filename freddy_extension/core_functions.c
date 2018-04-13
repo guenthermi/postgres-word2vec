@@ -243,7 +243,7 @@ centroid(PG_FUNCTION_ARGS)
       output[offset % vec_size] += DatumGetFloat4(elem) / (float) input_size;
   }
 
-  dvalues = (Datum*) malloc(sizeof(Datum)*vec_size);
+  dvalues = (Datum*) palloc(sizeof(Datum)*vec_size);
 
   for (int i = 0; i < vec_size; i++){
     dvalues[i] = Float4GetDatum(output[i]);
