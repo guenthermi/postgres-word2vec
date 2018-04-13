@@ -176,7 +176,7 @@ def main(argc, argv):
         cur = con.cursor()
 
         utils.init_tables(con, cur, get_table_information(index_config), logger)
-        utils.disable_triggers(con,cur)
+        utils.disable_triggers(index_config.get_value("pq_table_name"), con,cur)
 
 
     # create index with qunatizer
@@ -208,7 +208,7 @@ def main(argc, argv):
             add_to_database(words, codebook, index, counts, con, cur, index_config, batch_size, logger)
             logger.log(logger.INFO, 'Create database index structures')
             utils.create_index(index_config.get_value("pq_table_name"), index_config.get_value("pq_index_name"), 'word', con, cur, logger)
-            utils.enable_triggers(con, cur)
+            utils.enable_triggers(index_config.get_value("pq_table_name"), con, cur)
 
     # pipeline approach
     if use_pipeline:
@@ -248,7 +248,7 @@ def main(argc, argv):
             logger.log(Logger.INFO, 'Added codebook entries into database')
             logger.log(logger.INFO, 'Create database index structures')
             utils.create_index(index_config.get_value("pq_table_name"), index_config.get_value("pq_index_name"), 'word', con, cur, logger)
-            utils.enable_triggers(con, cur)
+            utils.enable_triggers(index_config.get_value("pq_table_name"), con, cur)
 
 if __name__ == "__main__":
 	main(len(sys.argv), sys.argv)
