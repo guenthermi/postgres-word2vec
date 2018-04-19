@@ -22,13 +22,6 @@ typedef struct UsrFctx {
   char **values;
 } UsrFctx;
 
-typedef struct UsrFctxCplx {
-  TopKCplx tk;
-  int k;
-  int iter;
-  char **values;
-} UsrFctxCplx;
-
 typedef struct UsrFctxBatch {
   TopK* tk;
   int k;
@@ -85,7 +78,6 @@ pq_search(PG_FUNCTION_ARGS)
 
      float* querySimilarities;
 
-     Datum* queryData;
      int n = 0;
 
      MemoryContext  oldcontext;
@@ -118,12 +110,8 @@ pq_search(PG_FUNCTION_ARGS)
      elog(INFO,"get codebook time %f", (double) (end - start) / CLOCKS_PER_SEC);
 
     // read query from function args
-    getArray(PG_GETARG_ARRAYTYPE_P(0), &queryData, &n);
-
-    queryVector = palloc(n*sizeof(float));
-    for (int j=0; j< n; j++){
-      queryVector[j] = DatumGetFloat4(queryData[j]);
-    }
+    n = 0;
+    convert_bytea_float4(PG_GETARG_BYTEA_P(0), &queryVector, &n);
 
     subvectorSize = n / cbPositions;
 
@@ -149,6 +137,7 @@ pq_search(PG_FUNCTION_ARGS)
     SPI_connect();
     command = palloc(sizeof(char)*100);
     sprintf(command, "SELECT id, vector FROM %s", pqQuantizationTable);
+    elog(INFO, "command: %s", command);
     ret = SPI_exec(command, 0);
     proc = SPI_processed;
     end = clock();
@@ -158,19 +147,11 @@ pq_search(PG_FUNCTION_ARGS)
       TupleDesc tupdesc = SPI_tuptable->tupdesc;
       SPITupleTable *tuptable = SPI_tuptable;
 
-      Oid i_eltype;
-      int16 i_typlen;
-      bool i_typbyval;
-      char i_typalign;
-      bool *nulls;
-
       Datum id;
       Datum vector;
-      Datum* data;
+      int16* codes;
       int wordId;
       float distance;
-
-      int code;
 
       int i;
       for (i = 0; i < proc; i++){
@@ -179,18 +160,12 @@ pq_search(PG_FUNCTION_ARGS)
         id = SPI_getbinval(tuple, tupdesc, 1, &info);
         vector = SPI_getbinval(tuple, tupdesc, 2, &info);
         wordId = DatumGetInt32(id);
-
-        if (i == 0){
-        i_eltype = ARR_ELEMTYPE(DatumGetArrayTypeP(vector));
-        get_typlenbyvalalign(i_eltype, &i_typlen, &i_typbyval, &i_typalign);
-        }
-
-        deconstruct_array(DatumGetArrayTypeP(vector), i_eltype, i_typlen, i_typbyval, i_typalign, &data, &nulls, &n);
-
+        n = 0;
+        convert_bytea_int16(DatumGetByteaP(vector), &codes, &n);
+        // elog(INFO, "codes[0] %d", codes[0]);
         distance = 0;
         for (int j = 0; j < n; j++){
-          code = DatumGetInt32(data[j]);
-          distance += querySimilarities[j*cbCodes + code];
+          distance += querySimilarities[j*cbCodes + codes[j]];
         }
         if (distance < maxDist){
           updateTopK(topK, distance, wordId, k, maxDist);
@@ -267,8 +242,6 @@ ivfadc_search(PG_FUNCTION_ARGS)
 
     MemoryContext  oldcontext;
 
-    Datum* queryData;
-
     Codebook residualCb;
     int cbPositions = 0;
     int cbCodes = 0;
@@ -277,7 +250,7 @@ ivfadc_search(PG_FUNCTION_ARGS)
     CoarseQuantizer cq;
     int cqSize;
 
-    float* queryVector;
+    float4* queryVector;
     int k;
     int queryDim;
 
@@ -317,10 +290,8 @@ ivfadc_search(PG_FUNCTION_ARGS)
 
     k = PG_GETARG_INT32(1);
 
-
     // get codebook
     residualCb = getCodebook(&cbPositions, &cbCodes, tableNameResidualCodebook);
-
     // get coarse quantizer
     cq = getCoarseQuantizer(&cqSize);
 
@@ -328,12 +299,10 @@ ivfadc_search(PG_FUNCTION_ARGS)
     elog(INFO,"get coarse quantizer and residual codebook data time %f", (double) (end - start) / CLOCKS_PER_SEC);
 
    // read query from function args
-   getArray(PG_GETARG_ARRAYTYPE_P(0), &queryData, &n);
-   queryVector = palloc(n*sizeof(float));
+   n = 0;
+   convert_bytea_float4(PG_GETARG_BYTEA_P(0), &queryVector, &n);
+  //  queryVector = palloc(n*sizeof(float));
    queryDim = n;
-   for (int j=0; j< queryDim; j++){
-     queryVector[j] = DatumGetFloat4(queryData[j]);
-   }
 
    subvectorSize = n / cbPositions;
 
@@ -410,7 +379,7 @@ ivfadc_search(PG_FUNCTION_ARGS)
         for (i = 0; i < proc; i++){
           Datum id;
           Datum vector;
-          Datum* data;
+          int16* codes;
           int wordId;
           float distance;
 
@@ -418,11 +387,11 @@ ivfadc_search(PG_FUNCTION_ARGS)
           id = SPI_getbinval(tuple, tupdesc, 1, &info);
           vector = SPI_getbinval(tuple, tupdesc, 2, &info);
           wordId = DatumGetInt32(id);
-          getArray(DatumGetArrayTypeP(vector), &data, &n);
+          n = 0;
+          convert_bytea_int16(DatumGetByteaP(vector), &codes, &n);
           distance = 0;
           for (int j = 0; j < n; j++){
-            int code = DatumGetInt32(data[j]);
-            distance += querySimilarities[j*cbCodes + code];
+            distance += querySimilarities[j*cbCodes + codes[j]];
           }
           if (distance < maxDist){
             updateTopK(topK, distance, wordId, k, maxDist);
@@ -506,17 +475,17 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
 
     int* queryIds;
     int queryIdsSize;
-    float** queryVectors = NULL;
+    float4** queryVectors = NULL;
     int queryVectorsSize = 0;
     int* idArray = NULL;
     int k;
     int queryDim = 0;
 
-    float* residualVector;
+    float4* residualVector;
 
     int n = 0;
 
-    float** querySimilarities;
+    float4** querySimilarities;
 
     int ret;
     int proc;
@@ -525,10 +494,10 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
     char* cur;
 
     TopK* topKs;
-    float* maxDists;
+    float4* maxDists;
 
     // for coarse quantizer
-    float minDist; // sufficient high value
+    float4 minDist; // sufficient high value
     int* cqIds;
     int** cqTableIds;
     int* cqTableIdCounts;
@@ -591,23 +560,22 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
      TupleDesc tupdesc = SPI_tuptable->tupdesc;
      SPITupleTable *tuptable = SPI_tuptable;
      queryVectorsSize = proc;
-     queryVectors = SPI_palloc(sizeof(float*)*queryVectorsSize);
+     queryVectors = SPI_palloc(sizeof(float4*)*queryVectorsSize);
      idArray = SPI_palloc(sizeof(int)*queryVectorsSize);
      for (int i = 0; i < proc; i++){
        Datum id;
        Datum vector;
-       Datum* data;
+       bytea* data;
 
        HeapTuple tuple = tuptable->vals[i];
        id = SPI_getbinval(tuple, tupdesc, 1, &info);
        vector = SPI_getbinval(tuple, tupdesc, 2, &info);
        idArray[i] = DatumGetInt32(id);
-       getArray(DatumGetArrayTypeP(vector), &data, &n);
-       queryDim = n;
-       queryVectors[i] = SPI_palloc(queryDim*sizeof(float));
-       for (int j = 0; j < queryDim; j++){
-         queryVectors[i][j] = DatumGetFloat4(data[j]);
-       }
+
+       data = DatumGetByteaP(vector);
+       queryDim = (VARSIZE(data) - VARHDRSZ) / sizeof(float4);
+       queryVectors[i] = SPI_palloc(queryDim * sizeof(float4));
+       memcpy(queryVectors[i], (float4*) VARDATA(data), queryDim*sizeof(float4));
      }
      SPI_finish();
    }
@@ -621,8 +589,8 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
    topKs = palloc(sizeof(TopK)*queryVectorsSize);
    bls = palloc(sizeof(Blacklist)*queryVectorsSize);
    cqIds = palloc(sizeof(int)*queryVectorsSize);
-   querySimilarities = palloc(sizeof(float*)*queryVectorsSize);
-   maxDists = palloc(sizeof(float)*queryVectorsSize);
+   querySimilarities = palloc(sizeof(float4*)*queryVectorsSize);
+   maxDists = palloc(sizeof(float4)*queryVectorsSize);
    for (int i = 0; i < queryVectorsSize; i++){
      foundInstances[i] = 0;
      bls[i].isValid = false;
@@ -658,7 +626,7 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
        // get coarse_quantization(queryVector) (id)
        minDist = 1000;
        for (int j=0; j < cqSize; j++){
-         float dist;
+         float4 dist;
 
          if (inBlacklist(j, &(bls[i]))){
            continue;
@@ -679,17 +647,17 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
        cqTableIdCounts[cq[cqIds[i]].id] += 1;
 
        // compute residual = queryVector - coarse_quantization(queryVector)
-       residualVector = palloc(queryDim*sizeof(float));
+       residualVector = palloc(queryDim*sizeof(float4));
        for (int j = 0; j < queryDim; j++){
          residualVector[j] = queryVectors[i][j] - cq[cqIds[i]].vector[j];
        }
        // compute subvector similarities lookup
        // determine similarities of codebook entries to residual vector
-       querySimilarities[i] = palloc(cbPositions*cbCodes*sizeof(float));
+       querySimilarities[i] = palloc(cbPositions*cbCodes*sizeof(float4));
        for (int j=0; j< cbPositions*cbCodes; j++){
            int pos = residualCb[j].pos;
            int code = residualCb[j].code;
-           float* vector = residualCb[j].vector;
+           float4* vector = residualCb[j].vector;
            querySimilarities[i][pos*cbCodes + code] = squareDistance(residualVector+(pos*subvectorSize), vector, subvectorSize);
        }
      }
@@ -729,7 +697,6 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
        cur += sprintf(cur, "%d,", cq[cqIds[i]].id);
      }
      sprintf(cur-1, ")");
-
      end = clock();
      elog(INFO,"create command time %f", (double) (end - start) / CLOCKS_PER_SEC);
      ret = SPI_exec(command, 0);
@@ -743,10 +710,11 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
          Datum id;
          Datum vector;
          Datum coarseIdData;
-         Datum* data;
+         bytea* data;
+         int16* vector_raw;
          int wordId;
          int coarseId;
-         float distance;
+         float4 distance;
 
          HeapTuple tuple = tuptable->vals[i];
          id = SPI_getbinval(tuple, tupdesc, 1, &info);
@@ -754,12 +722,14 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
          coarseIdData = SPI_getbinval(tuple, tupdesc, 3, &info);
          wordId = DatumGetInt32(id);
          coarseId = DatumGetInt32(coarseIdData);
-         getArray(DatumGetArrayTypeP(vector), &data, &n);
+         data = DatumGetByteaP(vector);
+         vector_raw = (int16*) VARDATA(data);
+
          for (int j = 0; j < cqTableIdCounts[coarseId];j++){
            int queryVectorsIndex = cqTableIds[coarseId][j];
            distance = 0;
            for (int l = 0; l < cbPositions; l++){
-             int code = DatumGetInt32(data[l]);
+             int code = vector_raw[l];
              distance += querySimilarities[queryVectorsIndex][l*cbCodes + code];
            }
            if (distance < maxDists[queryVectorsIndex]){
@@ -847,7 +817,6 @@ pq_search_in(PG_FUNCTION_ARGS)
 
     int k;
 
-    Datum* queryData;
     float* queryVector;
     int queryVectorSize;
 
@@ -887,11 +856,7 @@ pq_search_in(PG_FUNCTION_ARGS)
     k = PG_GETARG_INT32(1);
 
     // read query from function args
-    getArray(PG_GETARG_ARRAYTYPE_P(0), &queryData, &n);
-    queryVector = palloc(n*sizeof(float));
-    for (int j=0; j< n; j++){
-      queryVector[j] = DatumGetFloat4(queryData[j]);
-    }
+    convert_bytea_float4(PG_GETARG_BYTEA_P(0), &queryVector, &n);
     queryVectorSize = n;
 
     // read ids from function args
@@ -946,7 +911,7 @@ pq_search_in(PG_FUNCTION_ARGS)
       for (i = 0; i < proc; i++){
         Datum id;
         Datum vector;
-        Datum* data;
+        int16* codes;
         int wordId;
         float distance;
 
@@ -954,11 +919,13 @@ pq_search_in(PG_FUNCTION_ARGS)
         id = SPI_getbinval(tuple, tupdesc, 1, &info);
         vector = SPI_getbinval(tuple, tupdesc, 2, &info);
         wordId = DatumGetInt32(id);
-        getArray(DatumGetArrayTypeP(vector), &data, &n);
+
+        n = 0;
+        convert_bytea_int16(DatumGetByteaP(vector), &codes, &n);
+
         distance = 0;
         for (int j = 0; j < n; j++){
-          int code = DatumGetInt32(data[j]);
-          distance += querySimilarities[j*cbCodes + code];
+          distance += querySimilarities[j*cbCodes + codes[j]];
         }
         if (distance < maxDist){
           updateTopK(topK, distance, wordId, k, maxDist);
@@ -999,212 +966,6 @@ pq_search_in(PG_FUNCTION_ARGS)
     Datum result;
     HeapTuple outTuple;
     snprintf(usrfctx->values[0], 16, "%d", usrfctx->tk[usrfctx->iter].id);
-    snprintf(usrfctx->values[1], 16, "%f", usrfctx->tk[usrfctx->iter].distance);
-    usrfctx->iter++;
-    outTuple = BuildTupleFromCStrings (funcctx -> attinmeta,
-  				      usrfctx -> values);
-    result = TupleGetDatum (funcctx -> slot, outTuple);
-    SRF_RETURN_NEXT(funcctx, result);
-
-  }
-
-}
-
-PG_FUNCTION_INFO_V1(pq_search_in_cplx);
-
-Datum
-pq_search_in_cplx(PG_FUNCTION_ARGS)
-{
-
-  FuncCallContext *funcctx;
-  TupleDesc        outtertupdesc;
-  TupleTableSlot  *slot;
-  AttInMetadata   *attinmeta;
-  UsrFctxCplx *usrfctx;
-
-  if (SRF_IS_FIRSTCALL ())
-   {
-
-    int k;
-
-    Datum* queryData;
-    float* queryVector;
-    int queryVectorSize;
-
-    Datum* termsData;
-    char*** inputTerms;
-    int inputTermsSize;
-    int inputTermsPlaneSize;
-
-    int n = 0;
-
-    Codebook cb;
-    int cbPositions = 0;
-    int cbCodes = 0;
-    int subvectorSize;
-
-    float* querySimilarities;
-    TopKCplx topK;
-    float maxDist;
-
-    int ret;
-    int proc;
-    bool info;
-    char* command;
-    char * cur;
-
-    map_t mymap;
-    int ecode;
-
-    MemoryContext  oldcontext;
-
-    char* tableNameCodebook = palloc(sizeof(char)*100);
-    char* tableNamePqQuantization = palloc(sizeof(char)*100);
-
-    mymap = hashmap_new();
-
-    getTableName(CODEBOOK, tableNameCodebook, 100);
-    getTableName(PQ_QUANTIZATION, tableNamePqQuantization, 100);
-
-    funcctx = SRF_FIRSTCALL_INIT ();
-    oldcontext = MemoryContextSwitchTo (funcctx->multi_call_memory_ctx);
-
-    k = PG_GETARG_INT32(1);
-
-    // read query from function args
-    getArray(PG_GETARG_ARRAYTYPE_P(0), &queryData, &n);
-    queryVector = palloc(n*sizeof(float));
-    for (int j=0; j< n; j++){
-      queryVector[j] = DatumGetFloat4(queryData[j]);
-    }
-    queryVectorSize = n;
-
-    // read string array and transform it to 2-dimensional# token array
-    getArray(PG_GETARG_ARRAYTYPE_P(2), &termsData, &n);
-    inputTerms = palloc(n*sizeof(char**));
-    inputTermsPlaneSize = 0;
-    for (int j=0; j< n; j++){
-      char* term = palloc(sizeof(char)*(VARSIZE(termsData[j]) - VARHDRSZ+1));
-      snprintf(term, VARSIZE(termsData[j]) + 1 - VARHDRSZ, "%s",(char*) VARDATA(termsData[j]));
-      inputTermsPlaneSize += strlen(term);
-      inputTerms[j] = split(term, ' ');
-    }
-    inputTermsSize = n;
-
-    // get pq codebook
-    cb = getCodebook(&cbPositions, &cbCodes, tableNameCodebook);
-
-    subvectorSize = queryVectorSize / cbPositions;
-
-    // determine similarities of codebook entries to query vector
-    querySimilarities = palloc(cbPositions*cbCodes*sizeof(float));
-    for (int i=0; i< cbPositions*cbCodes; i++){
-      int pos = cb[i].pos;
-      int code = cb[i].code;
-      float* vector = cb[i].vector;
-      querySimilarities[pos*cbCodes + code] = squareDistance(queryVector+(pos*subvectorSize), vector, subvectorSize);
-    }
-
-    // get codes for all entries with an id in inputTerms -> SQL Query
-    SPI_connect();
-    command = palloc(60* sizeof(char) + inputTermsPlaneSize*5*sizeof(char)); // TODO determine maximal string size more precise
-    sprintf(command, "SELECT word, vector FROM %s WHERE word IN (", tableNamePqQuantization);
-    // fill command
-    cur = command + strlen(command);
-    for (int i = 0; i < inputTermsSize; i++){
-      for (int j = 0; inputTerms[i][j]; j++){
-        if (( i == inputTermsSize - 1) && (inputTerms[i][j+1] == NULL)){
-            cur += sprintf(cur, "'%s'", inputTerms[i][j]);
-        }else{
-          cur += sprintf(cur, "'%s', ", inputTerms[i][j]);
-        }
-      }
-    }
-    cur += sprintf(cur, ")");
-    ret = SPI_exec(command, 0);
-    proc = SPI_processed;
-    if (ret > 0 && SPI_tuptable != NULL){
-      TupleDesc tupdesc = SPI_tuptable->tupdesc;
-      SPITupleTable *tuptable = SPI_tuptable;
-      int i;
-      for (i = 0; i < proc; i++){
-        char* word;
-        Datum vector;
-        Datum* data;
-        char* wordText = SPI_palloc(sizeof(char)* 100);
-        float* distancePointer = SPI_palloc(sizeof(float));
-
-        HeapTuple tuple = tuptable->vals[i];
-        word = SPI_getvalue(tuple, tupdesc, 1);
-        vector = SPI_getbinval(tuple, tupdesc, 2, &info);
-        snprintf(wordText, strlen(word)+1, "%s", word);
-        getArray(DatumGetArrayTypeP(vector), &data, &n);
-        *distancePointer = 0;
-        for (int j = 0; j < n; j++){
-          int code = DatumGetInt32(data[j]);
-          *distancePointer += querySimilarities[j*cbCodes + code];
-        }
-        // put distance in hashmap
-        ecode = hashmap_put(mymap, wordText,distancePointer);
-      }
-      SPI_finish();
-      // calculate TopK
-      topK = palloc(k*sizeof(TopKWordEntry));
-      maxDist = 100.0; // sufficient high value
-      for (int i = 0; i < k; i++){
-        topK[i].distance = 100.0;
-        topK[i].word = palloc(100*sizeof(char));
-      }
-      for (int i = 0; i < inputTermsSize; i++){
-        float minDist = 100;
-        for (int j = 0; inputTerms[i][j]; j++){
-          float* currentDist;
-          ecode = hashmap_get(mymap, inputTerms[i][j], (void**)&currentDist);
-          if ((ecode == MAP_OK) && (*currentDist < minDist)){
-            minDist = *currentDist;
-          }
-        }
-        if (minDist < maxDist){
-          updateTopKCplx(topK, minDist, inputTerms[i], k, maxDist);
-          maxDist = topK[k-1].distance;
-        }
-      }
-
-      // free hashmap
-      hashmap_free(mymap);
-
-      usrfctx = (UsrFctxCplx*) palloc (sizeof (UsrFctxCplx));
-      usrfctx -> tk = topK;
-      usrfctx -> k = k;
-      usrfctx -> iter = 0;
-      usrfctx -> values = (char **) palloc (2 * sizeof (char *));
-      usrfctx -> values  [0] = (char*) palloc   (100 * sizeof (char));
-      usrfctx -> values  [1] = (char*) palloc  (16 * sizeof (char));
-      funcctx -> user_fctx = (void *)usrfctx;
-      outtertupdesc = CreateTemplateTupleDesc (2 , false);
-      TupleDescInitEntry (outtertupdesc,  1, "Term",    VARCHAROID, -1, 0);
-      TupleDescInitEntry (outtertupdesc,  2, "Distance",FLOAT4OID,  -1, 0);
-      slot = TupleDescGetSlot (outtertupdesc);
-      funcctx -> slot = slot;
-      attinmeta = TupleDescGetAttInMetadata (outtertupdesc);
-      funcctx -> attinmeta = attinmeta;
-
-      MemoryContextSwitchTo (oldcontext);
-
-    }
-
-  }
-  funcctx = SRF_PERCALL_SETUP ();
-  usrfctx = (UsrFctxCplx*) funcctx -> user_fctx;
-
-  // return results
-  if (usrfctx->iter >= usrfctx->k){
-      SRF_RETURN_DONE (funcctx);
-  }else{
-
-    Datum result;
-    HeapTuple outTuple;
-    snprintf(usrfctx->values[0], 100, "%s", usrfctx->tk[usrfctx->iter].word);
     snprintf(usrfctx->values[1], 16, "%f", usrfctx->tk[usrfctx->iter].distance);
     usrfctx->iter++;
     outTuple = BuildTupleFromCStrings (funcctx -> attinmeta,
@@ -1303,17 +1064,14 @@ cluster_pq(PG_FUNCTION_ARGS)
     // get pq codebook
     cb = getCodebook(&cbPositions, &cbCodes, tableNameCodebook);
     subvectorSize = vectorSize / cbPositions;
-
     // choose initial km-centroid randomly
     kmCentroidIds = palloc(sizeof(int)*k);
     shuffle(inputIds, kmCentroidIds, inputIdsSize, k);
     // get vectors for ids
     tableName = palloc(sizeof(char)*100);
-
     getTableName(NORMALIZED, tableName, 100);
     idVectors = getVectors(tableName, kmCentroidIds, k);
     kmCentroids = idVectors.vectors;
-
     kmCentroidsNew = palloc(sizeof(float*)*k);
     for (int i = 0; i < k; i++){
       kmCentroidsNew[i] = palloc(sizeof(float)*vectorSize);
@@ -1333,7 +1091,6 @@ cluster_pq(PG_FUNCTION_ARGS)
           kmCentroidsNew[i][j] = 0;
         }
       }
-
       // determine similarities of codebook entries to km_centroid vector
       querySimilarities = palloc(sizeof(float*) * k);
 
@@ -1381,8 +1138,8 @@ cluster_pq(PG_FUNCTION_ARGS)
           Datum pqVector;
           Datum bigVector;
 
-          Datum* dataPqVector;
-          Datum* dataBigVector;
+          int16* dataPqVector;
+          float4* dataBigVector;
 
           int wordId;
           float distance;
@@ -1397,18 +1154,17 @@ cluster_pq(PG_FUNCTION_ARGS)
           bigVector = SPI_getbinval(tuple, tupdesc, 3, &info);
 
           wordId = DatumGetInt32(id);
-
-          getArray(DatumGetArrayTypeP(pqVector), &dataPqVector, &n);
+          n = 0;
+          convert_bytea_int16(DatumGetByteaP(pqVector), &dataPqVector, &n);
           pqSize = n;
 
-          getArray(DatumGetArrayTypeP(bigVector), &dataBigVector, &n);
-
-
+          n = 0;
+          convert_bytea_float4(DatumGetByteaP(bigVector), &dataBigVector, &n);
 
           for (int centroidIndex = 0; centroidIndex < k; centroidIndex++){
             distance = 0;
             for (int j = 0; j < pqSize; j++){
-              int code = DatumGetInt32(dataPqVector[j]);
+              int16 code = dataPqVector[j];
               distance += querySimilarities[centroidIndex][j*cbCodes + code];
             }
 
@@ -1419,7 +1175,7 @@ cluster_pq(PG_FUNCTION_ARGS)
           }
           relationCounts[nearestCentroid[wordId]]++;
           for (int j = 0; j < vectorSize; j++){
-            kmCentroidsNew[nearestCentroid[wordId]][j] += DatumGetFloat4(dataBigVector[j]);
+            kmCentroidsNew[nearestCentroid[wordId]][j] += dataBigVector[j];
           }
         }
         SPI_finish();
@@ -1603,15 +1359,16 @@ grouping_pq(PG_FUNCTION_ARGS)
       SPITupleTable *tuptable = SPI_tuptable;
       for (int i = 0; i < proc; i++){
         Datum groupVector;
-        Datum* dataGroupVector;
+        float4* dataGroupVector;
         HeapTuple tuple = tuptable->vals[i];
 
         groupVector = SPI_getbinval(tuple, tupdesc, 2, &info);
-        getArray(DatumGetArrayTypeP(groupVector), &dataGroupVector, &n);
+        n = 0;
+        convert_bytea_float4(DatumGetByteaP(groupVector), &dataGroupVector, &n);
         vectorSize = n; // one asignment would be enough...
         groupVecs[i] = SPI_palloc(sizeof(float)*vectorSize);
         for (int j = 0; j < vectorSize; j++){
-          groupVecs[i][j] = DatumGetFloat4(dataGroupVector[j]);
+          groupVecs[i][j] = dataGroupVector[j];
         }
       }
     }
@@ -1662,7 +1419,7 @@ grouping_pq(PG_FUNCTION_ARGS)
         Datum id;
         Datum pqVector;
 
-        Datum* dataPqVector;
+        int16* dataPqVector;
 
         float distance;
         int pqSize;
@@ -1675,14 +1432,15 @@ grouping_pq(PG_FUNCTION_ARGS)
         pqVector = SPI_getbinval(tuple, tupdesc, 2, &info);
 
         inputIds[i] = DatumGetInt32(id);
-        getArray(DatumGetArrayTypeP(pqVector), &dataPqVector, &n);
+        n = 0;
+        convert_bytea_int16(DatumGetByteaP(pqVector), &dataPqVector, &n);
         pqSize = n;
 
 
         for (int groupIndex = 0; groupIndex < groupVecsSize; groupIndex++){
           distance = 0;
           for (int j = 0; j < pqSize; j++){
-            int code = DatumGetInt32(dataPqVector[j]);
+            int code = dataPqVector[j];
             distance += querySimilarities[groupIndex][j*cbCodes + code];
           }
 
@@ -1761,8 +1519,8 @@ insert_batch(PG_FUNCTION_ARGS)
   char* command;
   char* cur;
 
-  float** rawVectors;
-  float** rawVectorsUnnormalized;
+  float4** rawVectors;
+  float4** rawVectorsUnnormalized;
   int vectorSize = 0;
   char** tokens;
   int rawVectorsSize;
@@ -1835,8 +1593,8 @@ insert_batch(PG_FUNCTION_ARGS)
   ret = SPI_exec(command, 0);
   proc = SPI_processed;
   rawVectorsSize = proc;
-  rawVectors = SPI_palloc(sizeof(float*)*proc);
-  rawVectorsUnnormalized = SPI_palloc(sizeof(float*)*proc);
+  rawVectors = SPI_palloc(sizeof(float4*)*proc);
+  rawVectorsUnnormalized = SPI_palloc(sizeof(float4*)*proc);
   tokens = SPI_palloc(sizeof(char*)*proc);
   if (ret > 0 && SPI_tuptable != NULL){
     TupleDesc tupdesc = SPI_tuptable->tupdesc;
@@ -1846,8 +1604,7 @@ insert_batch(PG_FUNCTION_ARGS)
       Datum vectorUnnormalized;
       char* token;
 
-      Datum* dataVector;
-      Datum* dataVectorUnnormlized;
+      float4* tmpVector;
 
       HeapTuple tuple = tuptable->vals[i];
 
@@ -1857,30 +1614,25 @@ insert_batch(PG_FUNCTION_ARGS)
       tokens[i] = SPI_palloc(sizeof(char)* 100); // maybe replace with strlen(token)+1 when using TEXT data type
 
       snprintf(tokens[i], strlen(token)+1, "%s", token);
-      getArray(DatumGetArrayTypeP(vector), &dataVector, &n);
-      getArray(DatumGetArrayTypeP(vectorUnnormalized), &dataVectorUnnormlized, &n);
+      n = 0;
+      convert_bytea_float4(DatumGetByteaP(vector), &tmpVector, &n);
+      rawVectors[i] = SPI_palloc(sizeof(float4)*n);
+      memcpy(rawVectors[i], tmpVector, n*sizeof(float4));
+      n = 0;
+      convert_bytea_float4(DatumGetByteaP(vectorUnnormalized), &tmpVector, &n);
+      rawVectorsUnnormalized[i] = SPI_palloc(sizeof(float4)*n);
+      memcpy(rawVectors[i], tmpVector, n*sizeof(float4));
       vectorSize = n;
-      rawVectors[i] = SPI_palloc(sizeof(float)*vectorSize);
-      rawVectorsUnnormalized[i] = SPI_palloc(sizeof(float)*vectorSize);
-      for (int j= 0; j < vectorSize; j++){
-        rawVectors[i][j] = DatumGetFloat4(dataVector[j]);
-        rawVectorsUnnormalized[i][j] = DatumGetFloat4(dataVectorUnnormlized[j]);
-      }
     }
     SPI_finish();
   }
-
   // determine quantization and count increments
-
   // get pq codebook
   cb = getCodebookWithCounts(&cbPositions, &cbCodes, tableNameCodebook);
-
   // get residual codebook
   residualCb = getCodebookWithCounts(&cbrPositions, &cbrCodes, tableNameResidualCodebook);
-
   // get coarse quantizer
   cq = getCoarseQuantizer(&cqSize);
-
   // determine coarse quantization and residuals
   cqQuantizations = palloc(sizeof(int)*rawVectorsSize);
   nearestCoarseCentroidRaw = NULL;
@@ -1901,7 +1653,6 @@ insert_batch(PG_FUNCTION_ARGS)
       residuals[i][j] = rawVectors[i][j] - nearestCoarseCentroidRaw[j];
     }
   }
-
   // determine nearest centroids (quantization)
   nearestCentroids = palloc(sizeof(int*)*rawVectorsSize);
   countIncs = palloc(cbPositions*cbCodes*sizeof(int));
@@ -1965,6 +1716,49 @@ read_bytea(PG_FUNCTION_ARGS)
   lbs[0] = 1;
 
   info.elmtype = INT4OID;
+  get_typlenbyvalalign(info.elmtype, &info.elmlen, &info.elmbyval,  &info.elmalign);
+
+  v = construct_md_array(dvalues, NULL, 1, dims, lbs, info.elmtype, info.elmlen, info.elmbyval, info.elmalign);
+
+  PG_RETURN_ARRAYTYPE_P(v);
+
+}
+
+PG_FUNCTION_INFO_V1(read_bytea_int16);
+
+Datum
+read_bytea_int16(PG_FUNCTION_ARGS)
+{
+
+  typedef struct{
+      int16       elmlen;
+      bool        elmbyval;
+      char        elmalign;
+      Oid         elmtype;
+  } elm_info; // TODO define this in some header file
+
+  bytea *data = PG_GETARG_BYTEA_P(0);
+  int16* out;
+
+  int size = 0;
+
+  ArrayType* v;
+  Datum* dvalues;
+  int dims[1];
+  int lbs[1];
+  elm_info info;
+
+  convert_bytea_int16(data, &out, &size);
+
+  dvalues = (Datum*) palloc(sizeof(Datum)*size);
+  for (int i = 0; i < size; i++){
+    dvalues[i] = Int16GetDatum(out[i]);
+  }
+
+  dims[0] = size;
+  lbs[0] = 1;
+
+  info.elmtype = INT2OID;
   get_typlenbyvalalign(info.elmtype, &info.elmlen, &info.elmbyval,  &info.elmalign);
 
   v = construct_md_array(dvalues, NULL, 1, dims, lbs, info.elmtype, info.elmlen, info.elmbyval, info.elmalign);
@@ -2051,6 +1845,17 @@ vec_to_bytea(PG_FUNCTION_ARGS)
         convert_int32_bytea(vector, &out, n);
       }
       break;
+    case INT2OID:
+      {
+        {
+          int16* vector = palloc(n*sizeof(int16));;
+          for (int j=0; j< n; j++){
+            vector[j] = DatumGetInt16(vectorData[j]);
+          }
+          convert_int16_bytea(vector, &out, n);
+        }
+        break;
+      }
     default:
       elog(ERROR, "Unknown element type: %d", (int) eltype);
   }

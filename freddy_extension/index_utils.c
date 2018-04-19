@@ -37,22 +37,6 @@ void updateTopKWordEntry(char** term, char* word){
   }
 }
 
-void updateTopKCplx(TopKCplx tk, float distance, char** term, int k, int maxDist){
-  int i;
-  for (i = k-1; i >= 0; i--){
-    if (tk[i].distance < distance){
-      break;
-    }
-  }
-  i++;
-  for (int j = k-2; j >= i; j--){
-    tk[j+1].distance = tk[j].distance;
-    strcpy(tk[j+1].word, tk[j].word);
-  }
-  tk[i].distance = distance;
-  updateTopKWordEntry(term, tk[i].word);
-}
-
 
 bool inBlacklist(int id, Blacklist* bl){
   if (bl->isValid){
@@ -112,13 +96,12 @@ CoarseQuantizer getCoarseQuantizer(int* size){
   int ret;
   int proc;
   CoarseQuantizer result;
-
   char* tableNameCQ = palloc(sizeof(char)*100);
   getTableName(COARSE_QUANTIZATION, tableNameCQ, 100);
 
   SPI_connect();
   command = palloc(100*sizeof(char));
-  sprintf(command, "SELECT * FROM %s", tableNameCQ);
+  sprintf(command, "SELECT * FROM %s", "coarse_quantization_test");
   ret = SPI_exec(command, 0);
   proc = SPI_processed;
   *size = proc;
@@ -132,29 +115,21 @@ CoarseQuantizer getCoarseQuantizer(int* size){
       Datum vector;
       Datum* data;
 
-      Oid eltype;
-      int16 typlen;
-      bool typbyval;
-      char typalign;
-      bool *nulls;
       int n = 0;
 
-      ArrayType* vectorAt;
+      bytea* vectorData;
 
       bool info;
       HeapTuple tuple = tuptable->vals[i];
       id = SPI_getbinval(tuple, tupdesc, 1, &info);
       vector = SPI_getbinval(tuple, tupdesc, 2, &info);
-      vectorAt = DatumGetArrayTypeP(vector);
-      eltype = ARR_ELEMTYPE(vectorAt);
-      get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
-      deconstruct_array(vectorAt, eltype, typlen, typbyval, typalign, &data, &nulls, &n);
+      vectorData = DatumGetByteaP(vector);
 
       result[i].id = DatumGetInt32(id);
-      result[i].vector = SPI_palloc(n*sizeof(float));
-      for (int j=0; j< n; j++){
-        result[i].vector[j] = DatumGetFloat4(data[j]);
-      }
+      float4 *tmp = (float4 *) VARDATA(vectorData);
+      result[i].vector = SPI_palloc(VARSIZE(vectorData) - VARHDRSZ);
+      n = (VARSIZE(vectorData) - VARHDRSZ) / sizeof(float4);
+      memcpy(result[i].vector, tmp, n*sizeof(float4));
     }
     SPI_finish();
   }
@@ -164,13 +139,12 @@ CoarseQuantizer getCoarseQuantizer(int* size){
 }
 
 Codebook getCodebook(int* positions, int* codesize, char* tableName){
-  char command[50];
+  char command[100];
   int ret;
   int proc;
   Codebook result;
   SPI_connect();
   sprintf(command, "SELECT * FROM %s", tableName);
-
   ret = SPI_exec(command, 0);
   proc = SPI_processed;
   result = SPI_palloc(proc * sizeof(CodebookEntry));
@@ -183,35 +157,26 @@ Codebook getCodebook(int* positions, int* codesize, char* tableName){
       Datum pos;
       Datum code;
       Datum vector;
-      Datum* data;
 
-      Oid eltype;
-      int16 typlen;
-      bool typbyval;
-      char typalign;
-      bool *nulls;
       int n = 0;
-
-      ArrayType* vectorAt;
 
       bool info;
       HeapTuple tuple = tuptable->vals[i];
       pos = SPI_getbinval(tuple, tupdesc, 2, &info);
       code = SPI_getbinval(tuple, tupdesc, 3, &info);
       vector = SPI_getbinval(tuple, tupdesc, 4, &info);
-      vectorAt = DatumGetArrayTypeP(vector);
-      eltype = ARR_ELEMTYPE(vectorAt);
-      get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
-      deconstruct_array(vectorAt, eltype, typlen, typbyval, typalign, &data, &nulls, &n);
+
       (*positions) = fmax((*positions), pos);
       (*codesize) = fmax((*codesize), code);
 
       result[i].pos = DatumGetInt32(pos);
       result[i].code = DatumGetInt32(code);
-      result[i].vector = SPI_palloc(n*sizeof(float));
-      for (int j=0; j< n; j++){
-        result[i].vector[j] = DatumGetFloat4(data[j]);
-      }
+
+      bytea* vectorData = DatumGetByteaP(vector);
+      float4 *tmp = (float4 *) VARDATA(vectorData);
+      result[i].vector = SPI_palloc(VARSIZE(vectorData) - VARHDRSZ);
+      n = (VARSIZE(vectorData) - VARHDRSZ) / sizeof(float4);
+      memcpy(result[i].vector, tmp, n*sizeof(float4));
     }
     SPI_finish();
   }
@@ -242,17 +207,8 @@ CodebookWithCounts getCodebookWithCounts(int* positions, int* codesize, char* ta
       Datum pos;
       Datum code;
       Datum vector;
-      Datum* data;
       Datum count;
-
-      Oid eltype;
-      int16 typlen;
-      bool typbyval;
-      char typalign;
-      bool *nulls;
       int n = 0;
-
-      ArrayType* vectorAt;
 
       bool info;
       HeapTuple tuple = tuptable->vals[i];
@@ -260,20 +216,18 @@ CodebookWithCounts getCodebookWithCounts(int* positions, int* codesize, char* ta
       code = SPI_getbinval(tuple, tupdesc, 3, &info);
       vector = SPI_getbinval(tuple, tupdesc, 4, &info);
       count = SPI_getbinval(tuple, tupdesc, 5, &info);
-      vectorAt = DatumGetArrayTypeP(vector);
-      eltype = ARR_ELEMTYPE(vectorAt);
-      get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
-      deconstruct_array(vectorAt, eltype, typlen, typbyval, typalign, &data, &nulls, &n);
 
       (*positions) = fmax((*positions), pos);
       (*codesize) = fmax((*codesize), code);
 
       result[i].pos = DatumGetInt32(pos);
       result[i].code = DatumGetInt32(code);
-      result[i].vector = SPI_palloc(n*sizeof(float));
-      for (int j=0; j< n; j++){
-        result[i].vector[j] = DatumGetFloat4(data[j]);
-      }
+      bytea* vectorData = DatumGetByteaP(vector);
+      float4* tmp = (float4*) VARDATA(vectorData);
+
+      result[i].vector = SPI_palloc(VARSIZE(vectorData) - VARHDRSZ);
+      n = (VARSIZE(vectorData) - VARHDRSZ) / sizeof(float4);
+      memcpy(result[i].vector, tmp, n*sizeof(float4));
       result[i].count = DatumGetInt32(count);
     }
     SPI_finish();
@@ -328,22 +282,21 @@ WordVectors getVectors(char* tableName, int* ids, int idsSize){
     for (i = 0; i < proc; i++){
       Datum id;
       Datum vector;
-      Datum* data;
-      ArrayType* vectorAt;
+      float4* data;
+
       int wordId;
 
       HeapTuple tuple = tuptable->vals[i];
       id = SPI_getbinval(tuple, tupdesc, 1, &info);
       vector = SPI_getbinval(tuple, tupdesc, 2, &info);
       wordId = DatumGetInt32(id);
-      vectorAt = DatumGetArrayTypeP(vector);
-      eltype = ARR_ELEMTYPE(vectorAt);
-      get_typlenbyvalalign(eltype, &typlen, &typbyval, &typalign);
-      deconstruct_array(vectorAt, eltype, typlen, typbyval, typalign, &data, &nulls, &n);
+
+      convert_bytea_float4(DatumGetByteaP(vector), &data, &n);
+
       result.vectors[i] = SPI_palloc(sizeof(float)*n);
       result.ids[i] = wordId;
       for (int j = 0; j < n; j++){
-        result.vectors[i][j] = DatumGetFloat4(data[j]);
+        result.vectors[i][j] = data[j];
       }
     }
   }
@@ -491,7 +444,7 @@ void updateCodebookRelation(CodebookWithCounts cb, int cbPositions, int cbCodes,
       // update codebook entry
       command = palloc(sizeof(char)*(subvectorSize*16+6+6+100));
       cur = command;
-      cur += sprintf(cur, "UPDATE %s SET (vector, count) = ('{", tableNameCodebook);
+      cur += sprintf(cur, "UPDATE %s SET (vector, count) = (vec_to_bytea('{", tableNameCodebook);
       for (int j = 0; j < subvectorSize; j++){
         if (j < subvectorSize-1){
           cur += sprintf(cur, "%f, ", cb[i].vector[j]);
@@ -499,7 +452,7 @@ void updateCodebookRelation(CodebookWithCounts cb, int cbPositions, int cbCodes,
           cur += sprintf(cur, "%f", cb[i].vector[j]);
         }
       }
-      cur += sprintf(cur, "}', '%d')", cb[i].count);
+      cur += sprintf(cur, "}'::float4[]), '%d')", cb[i].count);
       cur += sprintf(cur, " WHERE (pos = %d) AND (code = %d)", cb[i].pos, cb[i].code);
       SPI_connect();
       ret = SPI_exec(command, 0);
@@ -522,10 +475,10 @@ void updateProductQuantizationRelation(int** nearestCentroids, char** tokens, in
     cur = command;
     if (cqQuantizations == NULL){
       cur += sprintf(cur, "INSERT INTO %s %s VALUES ((SELECT max(id) + 1 FROM %s), ", pqQuantizationTable, schema_pq_quantization, pqQuantizationTable);
-      cur += sprintf(cur, "'%s', '{", tokens[i]);
+      cur += sprintf(cur, "'%s', vec_to_bytea('{", tokens[i]);
     }else{
       cur += sprintf(cur, "INSERT INTO %s %s VALUES ((SELECT max(id) + 1 FROM %s), ", pqQuantizationTable, schema_fine_quantization, pqQuantizationTable);
-      cur += sprintf(cur, "%d, '%s', '{", cqQuantizations[i], tokens[i]);
+      cur += sprintf(cur, "%d, '%s', vec_to_bytea('{", cqQuantizations[i], tokens[i]);
     }
     for (int j = 0; j < cbPositions; j++){
       if (j < (cbPositions - 1)){
@@ -534,7 +487,7 @@ void updateProductQuantizationRelation(int** nearestCentroids, char** tokens, in
         cur += sprintf(cur, "%d", nearestCentroids[i][j]);
       }
     }
-    cur += sprintf(cur, "}'");
+    cur += sprintf(cur, "}'::int2[])");
     cur += sprintf(cur, ")");
     SPI_connect();
     ret = SPI_exec(command, 0);
@@ -552,7 +505,7 @@ void updateWordVectorsRelation(char* tableName, char** tokens, float** rawVector
   for (int i=0; i < rawVectorsSize; i++){
     command = palloc(sizeof(char)*(100 + vectorSize*10 + 200));
     cur = command;
-    cur += sprintf(cur, "INSERT INTO %s (id, word, vector) VALUES ((SELECT max(id) + 1 FROM %s), '%s', '{", tableName, tableName, tokens[i]);
+    cur += sprintf(cur, "INSERT INTO %s (id, word, vector) VALUES ((SELECT max(id) + 1 FROM %s), '%s', vec_to_bytea('{", tableName, tableName, tokens[i]);
     for (int j = 0; j < vectorSize; j++){
       if (j < (vectorSize - 1)){
         cur += sprintf(cur, "%f,", rawVectors[i][j]);
@@ -560,7 +513,7 @@ void updateWordVectorsRelation(char* tableName, char** tokens, float** rawVector
         cur += sprintf(cur, "%f", rawVectors[i][j]);
       }
     }
-    cur += sprintf(cur, "}'");
+    cur += sprintf(cur, "}'::float4[])");
     cur += sprintf(cur, ")");
     SPI_connect();
     ret = SPI_exec(command, 0);
@@ -585,6 +538,15 @@ void convert_bytea_int32(bytea* bstring, int32** output, int* size){
   memcpy(*output, ptr, (*size)*sizeof(int32));
 }
 
+void convert_bytea_int16(bytea* bstring, int16** output, int* size){
+  int16 *ptr = (int16 *) VARDATA(bstring);
+  if (*size == 0){ // if size value is given it is assumed that memory is already allocated
+    *output = palloc((VARSIZE(bstring) - VARHDRSZ));
+    *size = (VARSIZE(bstring) - VARHDRSZ) / sizeof(int16);
+  }
+  memcpy(*output, ptr, (*size)*sizeof(int16));
+}
+
 void convert_bytea_float4(bytea* bstring, float4** output, int* size){
   float4 *ptr = (float4 *) VARDATA(bstring);
   if (*size == 0){ // if size value is given it is assumed that memory is already allocated
@@ -604,4 +566,10 @@ void convert_int32_bytea(int32* input, bytea** output, int size){
   *output = (text *) palloc(size*sizeof(int32) + VARHDRSZ);
   SET_VARSIZE(*output, VARHDRSZ + size*sizeof(int32));
   memcpy(VARDATA(*output), input, size*sizeof(int32));
+}
+
+void convert_int16_bytea(int16* input, bytea** output, int size){
+  *output = (text *) palloc(size*sizeof(int16) + VARHDRSZ);
+  SET_VARSIZE(*output, VARHDRSZ + size*sizeof(int16));
+  memcpy(VARDATA(*output), input, size*sizeof(int16));
 }

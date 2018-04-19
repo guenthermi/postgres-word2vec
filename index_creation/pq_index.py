@@ -18,10 +18,15 @@ import quantizer_creation as qcreator
 from pq_index_creator import *
 
 USE_PIPELINE_APPROACH = True
+USE_BYTEA_TYPE = True
 
 def get_table_information(index_config):
-    return ((index_config.get_value("pq_table_name"),"(id serial PRIMARY KEY, word varchar(100), vector int[])"),
-        (index_config.get_value("cb_table_name"), "(id serial PRIMARY KEY, pos int, code int, vector float4[], count int)"))
+    if USE_BYTEA_TYPE:
+        return ((index_config.get_value("pq_table_name"),"(id serial PRIMARY KEY, word varchar(100), vector bytea)"),
+            (index_config.get_value("cb_table_name"), "(id serial PRIMARY KEY, pos int, code int, vector bytea, count int)"))
+    else:
+        return ((index_config.get_value("pq_table_name"),"(id serial PRIMARY KEY, word varchar(100), vector int[])"),
+            (index_config.get_value("cb_table_name"), "(id serial PRIMARY KEY, pos int, code int, vector float4[], count int)"))
 
 def create_index_with_faiss(vectors, codebook, logger):
     logger.log(Logger.INFO, 'Length of vectors: ' + str(len(vectors)))
@@ -97,7 +102,10 @@ def add_to_database(words, codebook, pq_quantization, counts, con, cur, index_co
         output_vec = utils.serialize_vector(pq_quantization[i])
         values.append({"word": words[i][:100], "vector": output_vec})
         if (i % (batch_size-1) == 0) or (i == (len(pq_quantization)-1)):
-            cur.executemany("INSERT INTO "+ index_config.get_value("pq_table_name") + " (word,vector) VALUES (%(word)s, %(vector)s)", tuple(values))
+            if USE_BYTEA_TYPE:
+                cur.executemany("INSERT INTO "+ index_config.get_value("pq_table_name") + " (word,vector) VALUES (%(word)s, vec_to_bytea(%(vector)s::int2[]))", tuple(values))
+            else:
+                cur.executemany("INSERT INTO "+ index_config.get_value("pq_table_name") + " (word,vector) VALUES (%(word)s, %(vector)s)", tuple(values))
             con.commit()
             logger.log(Logger.INFO, 'Inserted ' + str(i+1) + ' vectors')
             values = []
@@ -109,7 +117,10 @@ def add_codebook_to_database(codebook, counts, con, cur, index_config):
         for i in range(len(codebook[pos])):
             output_vec = utils.serialize_vector(codebook[pos][i])
             values.append({"pos": pos, "code": i, "vector": output_vec, "count": counts[(pos, i)]})
-        cur.executemany("INSERT INTO "+ index_config.get_value("cb_table_name") + " (pos,code,vector, count) VALUES (%(pos)s, %(code)s, %(vector)s, %(count)s)", tuple(values))
+        if USE_BYTEA_TYPE:
+            cur.executemany("INSERT INTO "+ index_config.get_value("cb_table_name") + " (pos,code,vector, count) VALUES (%(pos)s, %(code)s, vec_to_bytea(%(vector)s::float4[]), %(count)s)", tuple(values))
+        else:
+            cur.executemany("INSERT INTO "+ index_config.get_value("cb_table_name") + " (pos,code,vector, count) VALUES (%(pos)s, %(code)s, %(vector)s, %(count)s)", tuple(values))
         con.commit()
     return
 
@@ -119,7 +130,10 @@ def add_batch_to_database(word_batch, pq_quantization, con, cur, index_config, b
         output_vec = utils.serialize_vector(pq_quantization[i])
         values.append({"word": word_batch[i][:100], "vector": output_vec})
         if (i % (batch_size-1) == 0) or (i == (len(pq_quantization)-1)):
-            cur.executemany("INSERT INTO "+ index_config.get_value("pq_table_name") + " (word,vector) VALUES (%(word)s, %(vector)s)", tuple(values))
+            if USE_BYTEA_TYPE:
+                cur.executemany("INSERT INTO "+ index_config.get_value("pq_table_name") + " (word,vector) VALUES (%(word)s, vec_to_bytea(%(vector)s::int2[]))", tuple(values))
+            else:
+                cur.executemany("INSERT INTO "+ index_config.get_value("pq_table_name") + " (word,vector) VALUES (%(word)s, %(vector)s)", tuple(values))
             con.commit()
             values = []
     return
@@ -137,7 +151,7 @@ def determine_counts(codebook, pq_quantization):
     return result
 
 def main(argc, argv):
-    db_config = Configuration('db_config.json')
+    db_config = Configuration('config/db_config.json')
     logger = Logger(db_config.get_value('log'))
     if argc < 2:
         logger.log(Logger.ERROR, 'Configuration file for index creation required')

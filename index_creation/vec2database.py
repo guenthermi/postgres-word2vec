@@ -9,6 +9,8 @@ from config import *
 from logger import *
 import index_utils as utils
 
+USE_BYTEA_TYPE = True
+
 def init_tables(con, cur, table_name, logger):
     # drop old table
     query_clear = "DROP TABLE IF EXISTS " + table_name + ";"
@@ -17,7 +19,11 @@ def init_tables(con, cur, table_name, logger):
     logger.log(Logger.INFO, 'Exexuted DROP TABLE on ' + table_name)
 
     # create table
-    query_create_table = "CREATE TABLE " + table_name + " (id serial PRIMARY KEY, word varchar(100), vector float4[]);"
+    query_create_table = None
+    if USE_BYTEA_TYPE:
+        query_create_table = "CREATE TABLE " + table_name + " (id serial PRIMARY KEY, word varchar(100), vector bytea);"
+    else:
+        query_create_table = "CREATE TABLE " + table_name + " (id serial PRIMARY KEY, word varchar(100), vector float4[]);"
     result = cur.execute(cur.mogrify(query_create_table, (table_name,)))
     # commit changes
     con.commit()
@@ -68,7 +74,10 @@ def insert_vectors(filename, con, cur, table_name, batch_size, normalized, logge
             logger.log(Logger.WARNING, 'parsing problem with ' + line)
             count -= 1
         if count % batch_size == 0:
-            cur.executemany("INSERT INTO "+ table_name + " (word,vector) VALUES (%(word)s, %(vector)s)", tuple(values))
+            if USE_BYTEA_TYPE:
+                cur.executemany("INSERT INTO "+ table_name + " (word,vector) VALUES (%(word)s, vec_to_bytea(%(vector)s::float4[]))", tuple(values))
+            else:
+                cur.executemany("INSERT INTO "+ table_name + " (word,vector) VALUES (%(word)s, %(vector)s)", tuple(values))
             con.commit()
             logger.log(Logger.INFO, 'Inserted ' + str(count-1) + ' vectors')
             values = []
@@ -76,7 +85,10 @@ def insert_vectors(filename, con, cur, table_name, batch_size, normalized, logge
         count+= 1
         line = f.readline()
 
-    cur.executemany("INSERT INTO "+ table_name + " (word,vector) VALUES (%(word)s, %(vector)s)", tuple(values))
+    if USE_BYTEA_TYPE:
+        cur.executemany("INSERT INTO "+ table_name + " (word,vector) VALUES (%(word)s, vec_to_bytea(%(vector)s::float4[]))", tuple(values))
+    else:
+        cur.executemany("INSERT INTO "+ table_name + " (word,vector) VALUES (%(word)s, %(vector)s)", tuple(values))
     con.commit()
     logger.log(Logger.INFO, 'Inserted ' + str(count-1) + ' vectors')
     values = []
@@ -85,7 +97,7 @@ def insert_vectors(filename, con, cur, table_name, batch_size, normalized, logge
 
 def main(argc, argv):
 
-    db_config = Configuration('db_config.json')
+    db_config = Configuration('config/db_config.json')
     logger = Logger(db_config.get_value('log'))
 
     if argc < 2:
