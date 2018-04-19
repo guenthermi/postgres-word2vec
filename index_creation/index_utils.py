@@ -31,7 +31,7 @@ def get_vectors(filename, logger, max_count=10**9, normalization=True):
         else:
             logger.log(Logger.INFO, 'Can not decode the following line: ' + str(line));
         if count % 10000 == 0:
-            logger.log(Logger.INFO, 'INFO read ' + str(count) + ' vectors')
+            logger.log(Logger.INFO, 'Read ' + str(count) + ' vectors')
     return words, vectors, count
 
 def init_tables(con, cur, table_information, logger):

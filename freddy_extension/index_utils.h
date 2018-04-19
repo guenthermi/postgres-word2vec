@@ -15,7 +15,6 @@ typedef struct TopKWordEntry{
 }TopKWordEntry;
 
 typedef TopKEntry* TopK;
-typedef TopKWordEntry* TopKCplx;
 
 typedef struct CoarseQuantizerEntry{
     int id;
@@ -57,8 +56,6 @@ typedef CoarseQuantizerEntry* CoarseQuantizer;
 
 void updateTopK(TopK tk, float distance, int id, int k, int maxDist);
 
-void updateTopKCplx(TopKCplx tk, float distance, char**, int k, int maxDist);
-
 void updateTopKWordEntry(char** term, char* word);
 
 bool inBlacklist(int id, Blacklist* bl);
@@ -95,10 +92,14 @@ int compare (const void * a, const void * b);
 
 void convert_bytea_int32(bytea* bstring, int32** output, int32* size);
 
+void convert_bytea_int16(bytea* bstring, int16** output, int* size);
+
 void convert_bytea_float4(bytea* bstring, float4** output, int* size);
 
-void convert_float4_bytea(float4* input, bytea** output, int size);
-
 void convert_int32_bytea(int32* input, bytea** output, int size);
+
+void convert_int16_bytea(int16* input, bytea** output, int size);
+
+void convert_float4_bytea(float4* input, bytea** output, int size);
 
 #endif /*INDEX_UTILS_H*/

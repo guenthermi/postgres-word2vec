@@ -64,6 +64,26 @@ cosine_similarity_norm(PG_FUNCTION_ARGS)
   PG_RETURN_FLOAT8(sim);
 }
 
+PG_FUNCTION_INFO_V1(cosine_similarity_bytea);
+
+Datum
+cosine_similarity_bytea(PG_FUNCTION_ARGS)
+{
+  float4 scalar = 0;
+  bytea *data1 = PG_GETARG_BYTEA_P(0);
+  bytea *data2 = PG_GETARG_BYTEA_P(1);
+  float4* v1 = NULL;
+  float4* v2 = NULL;
+  int size = 0;
+  convert_bytea_float4(data1, &v1, &size);
+  size = 0;
+  convert_bytea_float4(data2, &v2, &size);
+  for (int i = 0; i < size; i++){
+    scalar += v1[i] * v2[i];
+  }
+  PG_RETURN_FLOAT4(scalar);
+}
+
 PG_FUNCTION_INFO_V1(vec_minus);
 
 Datum
@@ -98,6 +118,31 @@ vec_minus(PG_FUNCTION_ARGS)
 
   PG_RETURN_ARRAYTYPE_P(v);
 
+}
+
+PG_FUNCTION_INFO_V1(vec_minus_bytea);
+
+Datum
+vec_minus_bytea(PG_FUNCTION_ARGS)
+{
+  float4 *i_data1; // pointer to actual input vector
+  float4 *i_data2; // pointer to actual input vector
+  int n = 0; // dim of input vector
+
+  float4* dvalues;
+  bytea* output;
+
+  convert_bytea_float4(PG_GETARG_BYTEA_P(0), &i_data1, &n);
+  n = 0;
+  convert_bytea_float4(PG_GETARG_BYTEA_P(1), &i_data2, &n);
+  dvalues = (float4*) palloc(sizeof(float4)*n);
+
+  for (int i = 0; i<n; i++){
+    dvalues[i] = i_data1[i] - i_data2[i];
+  }
+
+  convert_float4_bytea(dvalues, &output, n);
+  PG_RETURN_BYTEA_P(output);
 }
 
 PG_FUNCTION_INFO_V1(vec_plus);
@@ -135,6 +180,29 @@ vec_plus(PG_FUNCTION_ARGS)
   v = construct_md_array(dvalues, NULL, 1, dims, lbs, FLOAT4OID, i_typlen, i_typbyval, i_typalign);
 
   PG_RETURN_ARRAYTYPE_P(v);
+}
+
+PG_FUNCTION_INFO_V1(vec_plus_bytea);
+
+Datum
+vec_plus_bytea(PG_FUNCTION_ARGS)
+{
+  float4 *i_data1; // pointer to actual input vector
+  float4 *i_data2; // pointer to actual input vector
+  int n = 0; // dim of input vector
+
+  float4* dvalues;
+  bytea* output;
+  convert_bytea_float4(PG_GETARG_BYTEA_P(0), &i_data1, &n);
+  n = 0;
+  convert_bytea_float4(PG_GETARG_BYTEA_P(1), &i_data2, &n);
+  dvalues = (float4*) palloc(sizeof(float4)*n);
+
+  for (int i = 0; i<n; i++){
+    dvalues[i] = i_data1[i] + i_data2[i];
+  }
+  convert_float4_bytea(dvalues, &output, n);
+  PG_RETURN_BYTEA_P(output);
 }
 
 PG_FUNCTION_INFO_V1(vec_normalize);
@@ -180,6 +248,39 @@ vec_normalize(PG_FUNCTION_ARGS)
   v = construct_md_array(dvalues, NULL, 1, dims, lbs, FLOAT4OID, i_typlen, i_typbyval, i_typalign);
 
   PG_RETURN_ARRAYTYPE_P(v);
+}
+
+PG_FUNCTION_INFO_V1(vec_normalize_bytea);
+
+Datum
+vec_normalize_bytea(PG_FUNCTION_ARGS)
+{
+
+  float4 *i_data; // pointer to actual input vector
+  int n = 0; // dim of input vector
+
+  float4* output;
+  bytea* v;
+
+  float sq_length = 0;
+  float length = 0;
+
+  convert_bytea_float4(PG_GETARG_BYTEA_P(0), &i_data, &n);
+
+  // determine square length
+  for (int i = 0; i<n; i++){
+    sq_length += i_data[i]* i_data[i];
+  }
+  length = sqrt(sq_length);
+
+  // normalize
+  output = palloc(n*sizeof(float4));
+  for (int i = 0; i<n; i++){
+    output[i] = i_data[i] / length;
+  }
+
+  convert_float4_bytea(output, &v, n);
+  PG_RETURN_BYTEA_P(v);
 }
 
 PG_FUNCTION_INFO_V1(centroid);
@@ -255,4 +356,48 @@ centroid(PG_FUNCTION_ARGS)
 
 PG_RETURN_ARRAYTYPE_P(v);
 
+}
+
+PG_FUNCTION_INFO_V1(centroid_bytea);
+
+Datum
+centroid_bytea(PG_FUNCTION_ARGS)
+{
+
+  // AnyArrayType *v;
+
+  int input_size;
+  bytea* v;
+
+  int vec_size = 0;
+  float* output;
+
+  Datum *i_data;
+  float4** data;
+
+  int n = 0;
+
+  getArray(PG_GETARG_ARRAYTYPE_P(0), &i_data, &n);
+  data = palloc(n*sizeof(float4*));
+  input_size = n;
+  for (int i = 0; i < n; i++){
+    int size = 0;
+    convert_bytea_float4(DatumGetByteaP(i_data[i]), &data[i], &size);
+    vec_size = size;
+  }
+
+  output = palloc(sizeof(float)*vec_size);
+
+  for (int i = 0; i < vec_size; i++){
+    output[i] = 0;
+  }
+
+  for (int i = 0; i < input_size; i++){
+    for (int j = 0; j < vec_size; j++){
+      output[j] += data[i][j] / (float) input_size;
+    }
+  }
+
+  convert_float4_bytea(output, &v, vec_size);
+  PG_RETURN_BYTEA_P(v);
 }

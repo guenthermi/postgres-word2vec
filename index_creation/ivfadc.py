@@ -20,11 +20,18 @@ import quantizer_creation as qcreator
 
 
 USE_PIPELINE_APPROACH = True
+USE_BYTEA_TYPE = True
 
 def get_table_information(index_config):
-    return ((index_config.get_value('coarse_table_name'),"(id serial PRIMARY KEY, vector float4[], count int)"),
-        (index_config.get_value('fine_table_name'),"(id serial PRIMARY KEY, coarse_id integer REFERENCES {!s} (id), word varchar(100), vector int[])".format(index_config.get_value('coarse_table_name'))),
-        (index_config.get_value('cb_table_name'), "(id serial PRIMARY KEY, pos int, code int, vector float4[], count int)"))
+    if USE_BYTEA_TYPE:
+        return ((index_config.get_value('coarse_table_name'),"(id serial PRIMARY KEY, vector bytea, count int)"),
+            (index_config.get_value('fine_table_name'),"(id serial PRIMARY KEY, coarse_id integer REFERENCES {!s} (id), word varchar(100), vector bytea)".format(index_config.get_value('coarse_table_name'))),
+            (index_config.get_value('cb_table_name'), "(id serial PRIMARY KEY, pos int, code int, vector bytea, count int)"))
+    else:
+        return ((index_config.get_value('coarse_table_name'),"(id serial PRIMARY KEY, vector float4[], count int)"),
+            (index_config.get_value('fine_table_name'),"(id serial PRIMARY KEY, coarse_id integer REFERENCES {!s} (id), word varchar(100), vector int[])".format(index_config.get_value('coarse_table_name'))),
+            (index_config.get_value('cb_table_name'), "(id serial PRIMARY KEY, pos int, code int, vector float4[], count int)"))
+
 
 def create_fine_quantizer(cq, vectors, m, centr_num, logger, iterts=10):
     if len(vectors[0]) % m != 0:
@@ -114,7 +121,10 @@ def add_codebook_to_database(codebook, fine_counts, con, cur, index_config):
             output_vec = utils.serialize_vector(codebook[pos][i])
             count = fine_counts[(pos, i)] if (pos, i) in fine_counts else 0
             values.append({"pos": pos, "code": i, "vector": output_vec, "count": count})
-        cur.executemany("INSERT INTO "+ index_config.get_value('cb_table_name') + " (pos,code,vector,count) VALUES (%(pos)s, %(code)s, %(vector)s, %(count)s)", tuple(values))
+        if USE_BYTEA_TYPE:
+            cur.executemany("INSERT INTO "+ index_config.get_value('cb_table_name') + " (pos,code,vector,count) VALUES (%(pos)s, %(code)s, vec_to_bytea(%(vector)s::float4[]), %(count)s)", tuple(values))
+        else:
+            cur.executemany("INSERT INTO "+ index_config.get_value('cb_table_name') + " (pos,code,vector,count) VALUES (%(pos)s, %(code)s, %(vector)s, %(count)s)", tuple(values))
         con.commit()
     return
 
@@ -125,7 +135,10 @@ def add_cq_to_database(cq, coarse_counts, con, cur, index_config):
         output_vec = utils.serialize_vector(cq[i])
         count = coarse_counts[i] if i in coarse_counts else 0
         values.append({"id": i, "vector": output_vec, "count": count})
-    cur.executemany("INSERT INTO " + index_config.get_value('coarse_table_name') + " (id, vector, count) VALUES (%(id)s, %(vector)s, %(count)s)", tuple(values))
+    if USE_BYTEA_TYPE:
+        cur.executemany("INSERT INTO " + index_config.get_value('coarse_table_name') + " (id, vector, count) VALUES (%(id)s, vec_to_bytea(%(vector)s::float4[]), %(count)s)", tuple(values))
+    else:
+        cur.executemany("INSERT INTO " + index_config.get_value('coarse_table_name') + " (id, vector, count) VALUES (%(id)s, %(vector)s, %(count)s)", tuple(values))
     con.commit()
     return
 
@@ -142,7 +155,10 @@ def add_to_database(words, cq, codebook, pq_quantization, coarse_counts, fine_co
         output_vec = utils.serialize_vector(pq_quantization[i][1])
         values.append({"coarse_id": str(pq_quantization[i][0]), "word": words[i][:100], "vector": output_vec})
         if (i % (batch_size-1) == 0) or (i == (len(pq_quantization)-1)):
-            cur.executemany("INSERT INTO "+ index_config.get_value('fine_table_name') + " (coarse_id, word,vector) VALUES (%(coarse_id)s, %(word)s, %(vector)s)", tuple(values))
+            if USE_BYTEA_TYPE:
+                cur.executemany("INSERT INTO "+ index_config.get_value('fine_table_name') + " (coarse_id, word,vector) VALUES (%(coarse_id)s, %(word)s, vec_to_bytea(%(vector)s::int2[]))", tuple(values))
+            else:
+                cur.executemany("INSERT INTO "+ index_config.get_value('fine_table_name') + " (coarse_id, word,vector) VALUES (%(coarse_id)s, %(word)s, %(vector)s)", tuple(values))
             con.commit()
             logger.log(Logger.INFO, 'Inserted ' +  str(i+1) + ' vectors')
             values = []
@@ -154,13 +170,16 @@ def add_batch_to_database(word_batch, pq_quantization, con, cur, index_config, b
         output_vec = utils.serialize_vector(pq_quantization[i][1])
         values.append({"coarse_id": str(pq_quantization[i][0]), "word": word_batch[i][:100], "vector": output_vec})
         if (i % (batch_size-1) == 0) or (i == (len(pq_quantization)-1)):
-            cur.executemany("INSERT INTO "+ index_config.get_value('fine_table_name') + " (coarse_id, word,vector) VALUES (%(coarse_id)s, %(word)s, %(vector)s)", tuple(values))
+            if USE_BYTEA_TYPE:
+                cur.executemany("INSERT INTO "+ index_config.get_value('fine_table_name') + " (coarse_id, word,vector) VALUES (%(coarse_id)s, %(word)s, vec_to_bytea(%(vector)s::int2[]))", tuple(values))
+            else:
+                cur.executemany("INSERT INTO "+ index_config.get_value('fine_table_name') + " (coarse_id, word,vector) VALUES (%(coarse_id)s, %(word)s, %(vector)s)", tuple(values))
             con.commit()
             values = []
     return
 
 def main(argc, argv):
-    db_config = Configuration('db_config.json')
+    db_config = Configuration('config/db_config.json')
     logger = Logger(db_config.get_value('log'))
     if argc < 2:
         logger.log(Logger.ERROR, 'Configuration file for index creation required')
