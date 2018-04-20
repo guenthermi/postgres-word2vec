@@ -21,6 +21,41 @@ END
 $$
 LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION set_knn_function(name varchar) RETURNS void AS $$
+BEGIN
+EXECUTE format('CREATE OR REPLACE FUNCTION get_knn_function_name() RETURNS varchar AS ''SELECT varchar ''''%s'''''' LANGUAGE sql IMMUTABLE', name);
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION set_knn_in_function(name varchar) RETURNS void AS $$
+BEGIN
+EXECUTE format('CREATE OR REPLACE FUNCTION get_knn_in_function_name() RETURNS varchar AS ''SELECT varchar ''''%s'''''' LANGUAGE sql IMMUTABLE', name);
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION set_knn_batch_function(name varchar) RETURNS void AS $$
+BEGIN
+EXECUTE format('CREATE OR REPLACE FUNCTION get_knn_batch_function_name() RETURNS varchar AS ''SELECT varchar ''''%s'''''' LANGUAGE sql IMMUTABLE', name);
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION set_analogy_function(name varchar) RETURNS void AS $$
+BEGIN
+EXECUTE format('CREATE OR REPLACE FUNCTION get_analogy_function_name() RETURNS varchar AS ''SELECT varchar ''''%s'''''' LANGUAGE sql IMMUTABLE', name);
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION set_groups_function(name varchar) RETURNS void AS $$
+BEGIN
+EXECUTE format('CREATE OR REPLACE FUNCTION get_groups_function_name() RETURNS varchar AS ''SELECT varchar ''''%s'''''' LANGUAGE sql IMMUTABLE', name);
+END
+$$
+LANGUAGE plpgsql;
+
 DO $$
 DECLARE
 init_done int;
@@ -34,6 +69,74 @@ END IF;
 END$$;
 
 SELECT set_pvf(1000);
+SELECT set_knn_function('k_nearest_neighbour');
+SELECT set_knn_in_function('knn_in_exact');
+SELECT set_knn_batch_function('k_nearest_neighbour_ivfadc_batch');
+SELECT set_analogy_function('analogy_3cosadd');
+SELECT set_groups_function('grouping_func');
+
+
+
+CREATE OR REPLACE FUNCTION knn(query varchar, k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
+DECLARE
+function_name varchar;
+BEGIN
+EXECUTE 'SELECT get_knn_function_name()' INTO function_name;
+RETURN QUERY EXECUTE format('
+SELECT * FROM %s(''%s'', %s)
+', function_name, query, k);
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION knn_in(query varchar(100), k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), similarity float4) AS $$
+DECLARE
+function_name varchar;
+BEGIN
+EXECUTE 'SELECT get_knn_in_function_name()' INTO function_name;
+RETURN QUERY EXECUTE format('
+SELECT * FROM %s(''%s'', %s, ''%s''::varchar[])
+', function_name, query, k, input_set);
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION knn_batch(query_set varchar(100)[], k integer) RETURNS TABLE (query varchar(100), target varchar(100), squareDistance float4) AS $$
+DECLARE
+function_name varchar;
+BEGIN
+EXECUTE 'SELECT get_knn_batch_function_name()' INTO function_name;
+RETURN QUERY EXECUTE format('
+SELECT * FROM %s(''%s'', %s)
+', function_name, query_set, k);
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION analogy(a varchar(100),b varchar(100),c varchar(100)) RETURNS TABLE (target varchar(100)) AS $$
+DECLARE
+function_name varchar;
+BEGIN
+EXECUTE 'SELECT get_analogy_function_name()' INTO function_name;
+RETURN QUERY EXECUTE format('
+SELECT * FROM %s(''%s'', ''%s'',''%s'')
+', function_name, a, b, c);
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION groups(tokens varchar[], groups varchar[]) RETURNS TABLE (token varchar(100), grouptoken varchar(100)) AS $$
+DECLARE
+function_name varchar;
+BEGIN
+EXECUTE 'SELECT get_groups_function_name()' INTO function_name;
+RETURN QUERY EXECUTE format('
+SELECT * FROM %s(''%s''::varchar[], ''%s''::varchar[])
+', function_name, tokens, groups);
+END
+$$
+LANGUAGE plpgsql;
+
 
 CREATE OR REPLACE FUNCTION cosine_similarity(float4[], float4[]) RETURNS float8
 AS '$libdir/freddy', 'cosine_similarity'
@@ -448,7 +551,7 @@ LANGUAGE plpgsql;
 
 -- TODO ADAPT
 -- TopK_In Exakt
-CREATE OR REPLACE FUNCTION knn_in(token varchar(100), k integer, input_set integer[]) RETURNS TABLE (word varchar(100), similarity float4) AS $$
+CREATE OR REPLACE FUNCTION knn_in_exact(token varchar(100), k integer, input_set integer[]) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;
 BEGIN
@@ -465,7 +568,7 @@ $$
 LANGUAGE plpgsql;
 
 -- TODO ADAPT
-CREATE OR REPLACE FUNCTION knn_in(query_vector bytea, k integer, input_set integer[]) RETURNS TABLE (word varchar(100), similarity float4) AS $$
+CREATE OR REPLACE FUNCTION knn_in_exact(query_vector bytea, k integer, input_set integer[]) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;
 BEGIN
@@ -481,7 +584,7 @@ $$
 LANGUAGE plpgsql;
 
 -- TODO ADAPT
-CREATE OR REPLACE FUNCTION knn_in(token varchar(100), k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), similarity float4) AS $$
+CREATE OR REPLACE FUNCTION knn_in_exact(token varchar(100), k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;
 formated varchar(100)[];
@@ -503,7 +606,7 @@ $$
 LANGUAGE plpgsql;
 
 -- TODO ADAPT
-CREATE OR REPLACE FUNCTION knn_in(query_vector bytea, k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), similarity float4) AS $$
+CREATE OR REPLACE FUNCTION knn_in_exact(query_vector bytea, k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;
 formated varchar(100)[];
@@ -564,7 +667,6 @@ END
 $$
 LANGUAGE plpgsql;
 
--- TODO 3CosMul
 CREATE OR REPLACE FUNCTION analogy_3cosmul(w1 varchar(100), w2 varchar(100), w3 varchar(100), OUT result varchar(100))
 AS  $$
 DECLARE
