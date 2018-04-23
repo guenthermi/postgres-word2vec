@@ -1621,7 +1621,7 @@ insert_batch(PG_FUNCTION_ARGS)
       n = 0;
       convert_bytea_float4(DatumGetByteaP(vectorUnnormalized), &tmpVector, &n);
       rawVectorsUnnormalized[i] = SPI_palloc(sizeof(float4)*n);
-      memcpy(rawVectors[i], tmpVector, n*sizeof(float4));
+      memcpy(rawVectorsUnnormalized[i], tmpVector, n*sizeof(float4));
       vectorSize = n;
     }
     SPI_finish();
