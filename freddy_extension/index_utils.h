@@ -48,6 +48,8 @@ typedef struct Blacklist{
 
 typedef enum {ORIGINAL, NORMALIZED, PQ_QUANTIZATION, CODEBOOK, RESIDUAL_QUANTIZATION, COARSE_QUANTIZATION, RESIDUAL_CODBOOK} tableType;
 
+typedef enum {PARAM_PVF, PARAM_W} parameterType;
+
 typedef CodebookEntry* Codebook;
 
 typedef CodebookEntryComplete* CodebookWithCounts;
@@ -77,6 +79,8 @@ WordVectors getVectors(char* tableName, int* ids, int idsSize);
 void getArray(ArrayType* input, Datum** result, int* n);
 
 void getTableName(tableType type, char* name, int bufferSize);
+
+void getParameter(parameterType type, int* param);
 
 char **split(const char *str, char sep);
 
