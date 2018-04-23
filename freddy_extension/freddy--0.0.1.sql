@@ -21,6 +21,13 @@ END
 $$
 LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION set_w(w integer) RETURNS void AS $$
+BEGIN
+EXECUTE format('CREATE OR REPLACE FUNCTION get_w() RETURNS integer AS ''SELECT %s'' LANGUAGE sql IMMUTABLE', w);
+END
+$$
+LANGUAGE plpgsql;
+
 CREATE OR REPLACE FUNCTION set_knn_function(name varchar) RETURNS void AS $$
 BEGIN
 EXECUTE format('CREATE OR REPLACE FUNCTION get_knn_function_name() RETURNS varchar AS ''SELECT varchar ''''%s'''''' LANGUAGE sql IMMUTABLE', name);
@@ -69,6 +76,7 @@ END IF;
 END$$;
 
 SELECT set_pvf(1000);
+SELECT set_w(3);
 SELECT set_knn_function('k_nearest_neighbour');
 SELECT set_knn_in_function('knn_in_exact');
 SELECT set_knn_batch_function('k_nearest_neighbour_ivfadc_batch');
