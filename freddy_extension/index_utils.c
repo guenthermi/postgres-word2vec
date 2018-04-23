@@ -101,7 +101,7 @@ CoarseQuantizer getCoarseQuantizer(int* size){
 
   SPI_connect();
   command = palloc(100*sizeof(char));
-  sprintf(command, "SELECT * FROM %s", "coarse_quantization_test");
+  sprintf(command, "SELECT * FROM %s", tableNameCQ);
   ret = SPI_exec(command, 0);
   proc = SPI_processed;
   *size = proc;

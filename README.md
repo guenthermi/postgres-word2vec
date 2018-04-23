@@ -134,20 +134,20 @@ After that, you can use the "vec2database.py" script to add the word vectors to 
 Execute the following code (this can take a while):
 
 ```
-python3 vec2database.py word_vecs.json
-python3 vec2database.py word_vecs_norm.json
+python3 vec2database.py config/vecs_config.json
+python3 vec2database.py config/vecs_config_norm.json
 ```
 
 To create the product quantization Index you have to execute "pq_index.py":
 
 ```
-python3 pq_index.py pq_config.json
+python3 pq_index.py config/pq_config.json
 ```
 
 The IVFADC index tables can be created with "ivfadc.py":
 
 ```
-python3 ivfadc.py ivfadc_config.json
+python3 ivfadc.py config/ivfadc_config.json
 ```
 
 After all index tables are created, you might execute `CREATE EXTENSION freddy;` a second time. To provide the table names of the index structures for the extension you can use the `init` function in the PSQL console (If you used the default names this might not be necessary) Replace the default names with the names defined in the JSON configuration files:
