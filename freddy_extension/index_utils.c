@@ -95,6 +95,9 @@ CoarseQuantizer getCoarseQuantizer(int* size){
   char* command;
   int ret;
   int proc;
+
+  float4 *tmp;
+
   CoarseQuantizer result;
   char* tableNameCQ = palloc(sizeof(char)*100);
   getTableName(COARSE_QUANTIZATION, tableNameCQ, 100);
@@ -113,7 +116,6 @@ CoarseQuantizer getCoarseQuantizer(int* size){
     for (i = 0; i < proc; i++){
       Datum id;
       Datum vector;
-      Datum* data;
 
       int n = 0;
 
@@ -126,7 +128,7 @@ CoarseQuantizer getCoarseQuantizer(int* size){
       vectorData = DatumGetByteaP(vector);
 
       result[i].id = DatumGetInt32(id);
-      float4 *tmp = (float4 *) VARDATA(vectorData);
+      tmp = (float4 *) VARDATA(vectorData);
       result[i].vector = SPI_palloc(VARSIZE(vectorData) - VARHDRSZ);
       n = (VARSIZE(vectorData) - VARHDRSZ) / sizeof(float4);
       memcpy(result[i].vector, tmp, n*sizeof(float4));
@@ -142,7 +144,13 @@ Codebook getCodebook(int* positions, int* codesize, char* tableName){
   char command[100];
   int ret;
   int proc;
+
+  float4* tmp;
+
   Codebook result;
+
+  bytea* vectorData;
+
   SPI_connect();
   sprintf(command, "SELECT * FROM %s", tableName);
   ret = SPI_exec(command, 0);
@@ -172,8 +180,8 @@ Codebook getCodebook(int* positions, int* codesize, char* tableName){
       result[i].pos = DatumGetInt32(pos);
       result[i].code = DatumGetInt32(code);
 
-      bytea* vectorData = DatumGetByteaP(vector);
-      float4 *tmp = (float4 *) VARDATA(vectorData);
+      vectorData = DatumGetByteaP(vector);
+      tmp = (float4 *) VARDATA(vectorData);
       result[i].vector = SPI_palloc(VARSIZE(vectorData) - VARHDRSZ);
       n = (VARSIZE(vectorData) - VARHDRSZ) / sizeof(float4);
       memcpy(result[i].vector, tmp, n*sizeof(float4));
@@ -191,6 +199,10 @@ CodebookWithCounts getCodebookWithCounts(int* positions, int* codesize, char* ta
   char command[50];
   int ret;
   int proc;
+  float4* tmp;
+
+  bytea* vectorData;
+
   CodebookWithCounts result;
   SPI_connect();
   sprintf(command, "SELECT * FROM %s", tableName);
@@ -222,8 +234,8 @@ CodebookWithCounts getCodebookWithCounts(int* positions, int* codesize, char* ta
 
       result[i].pos = DatumGetInt32(pos);
       result[i].code = DatumGetInt32(code);
-      bytea* vectorData = DatumGetByteaP(vector);
-      float4* tmp = (float4*) VARDATA(vectorData);
+      vectorData = DatumGetByteaP(vector);
+      tmp = (float4*) VARDATA(vectorData);
 
       result[i].vector = SPI_palloc(VARSIZE(vectorData) - VARHDRSZ);
       n = (VARSIZE(vectorData) - VARHDRSZ) / sizeof(float4);
@@ -246,11 +258,6 @@ WordVectors getVectors(char* tableName, int* ids, int idsSize){
   int proc;
   bool info;
 
-  Oid eltype;
-  int16 typlen;
-  bool typbyval;
-  char typalign;
-  bool *nulls;
   int n = 0;
 
   WordVectors result;
@@ -351,6 +358,37 @@ void getTableName(tableType type, char* name, int bufferSize){
   }
   SPI_finish();
 }
+
+void getParameter(parameterType type, int* param){
+  char* command;
+  int ret;
+  int proc;
+  bool info;
+
+  const char* function_names[] = {
+    "get_pvf()",
+    "get_w()"};
+
+  SPI_connect();
+
+  command = palloc(100*sizeof(char));
+  sprintf(command, "SELECT * FROM %s", function_names[type]);
+
+  ret = SPI_exec(command, 0);
+  proc = SPI_processed;
+  if (ret > 0 && SPI_tuptable != NULL){
+    TupleDesc tupdesc = SPI_tuptable->tupdesc;
+    SPITupleTable *tuptable = SPI_tuptable;
+    HeapTuple tuple;
+    if (proc != 1){
+      elog(ERROR, "Unexpected number of results: %d", proc);
+    }
+    tuple = tuptable->vals[0];
+    *param = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &info));
+  }
+  SPI_finish();
+}
+
 
 // inspired by https://stackoverflow.com/questions/9210528/split-string-with-delimiters-in-c?answertab=oldest#tab-top
 typedef struct {

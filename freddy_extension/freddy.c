@@ -254,23 +254,24 @@ ivfadc_search(PG_FUNCTION_ARGS)
     int k;
     int queryDim;
 
-    float* residualVector;
+    float** residualVectors;
 
     int n = 0;
 
-    float* querySimilarities;
+    float** querySimilarities;
 
     int ret;
     int proc;
     bool info;
-    char command[100];
+    char* command;
+    char* cur;
 
     TopK topK;
     float maxDist;
 
     // for coarse quantizer
     float minDist; // sufficient high value
-    int cqId = -1;
+    TopK cqSelection;
 
     int foundInstances;
     Blacklist bl;
@@ -279,11 +280,16 @@ ivfadc_search(PG_FUNCTION_ARGS)
     char* tableNameResidualCodebook = palloc(sizeof(char)*100);
     char* tableNameFineQuantization = palloc(sizeof(char)*100);
 
+    int param_w;
+
     start = clock();
 
     getTableName(NORMALIZED, tableName, 100);
     getTableName(RESIDUAL_CODBOOK, tableNameResidualCodebook, 100);
     getTableName(RESIDUAL_QUANTIZATION, tableNameFineQuantization, 100);
+    getParameter(PARAM_W, &param_w);
+
+    residualVectors = palloc(sizeof(float*)*param_w);
 
     funcctx = SRF_FIRSTCALL_INIT ();
     oldcontext = MemoryContextSwitchTo (funcctx->multi_call_memory_ctx);
@@ -321,7 +327,12 @@ ivfadc_search(PG_FUNCTION_ARGS)
      Blacklist* newBl;
 
      // get coarse_quantization(queryVector) (id)
-     minDist = 1000;
+     minDist = 1000.0;
+     cqSelection = palloc(sizeof(TopKEntry)*param_w);
+     for (int  i = 0; i < param_w; i++){
+       cqSelection[i].distance = 100.0;
+       cqSelection[i].id = -1;
+     }
      for (int i=0; i < cqSize; i++){
        float dist;
 
@@ -330,33 +341,40 @@ ivfadc_search(PG_FUNCTION_ARGS)
        }
        dist = squareDistance(queryVector, cq[i].vector, queryDim);
        if (dist < minDist){
-         minDist = dist;
-         cqId = i;
+         updateTopK(cqSelection, dist, i, param_w, minDist);
+         minDist = cqSelection[param_w-1].distance;
        }
      }
      end = clock();
      elog(INFO,"determine coarse quantization time %f", (double) (end - start) / CLOCKS_PER_SEC);
 
-     // add coarse quantizer to Blacklist
-     newBl = palloc(sizeof(Blacklist));
-     newBl->isValid = false;
-
-     addToBlacklist(cqId, &bl, newBl);
+     // add coarse quantization ids to Blacklist
+     for (int i = 0; i < param_w; i++){
+       newBl = palloc(sizeof(Blacklist));
+       newBl->isValid = false;
+       addToBlacklist(cqSelection[i].id, &bl, newBl);
+     }
 
      // compute residual = queryVector - coarse_quantization(queryVector)
-     residualVector = palloc(queryDim*sizeof(float));
-     for (int i = 0; i < queryDim; i++){
-       residualVector[i] = queryVector[i] - cq[cqId].vector[i];
+     for (int i = 0; i < param_w; i++){
+       residualVectors[i] = palloc(queryDim*sizeof(float));
+       for (int j = 0; j < queryDim; j++){
+         residualVectors[i][j] = queryVector[j] - cq[cqSelection[i].id].vector[j];
+       }
      }
 
      // compute subvector similarities lookup
      // determine similarities of codebook entries to residual vector
-     querySimilarities = palloc(cbPositions*cbCodes*sizeof(float));
-     for (int i=0; i< cbPositions*cbCodes; i++){
-         int pos = residualCb[i].pos;
-         int code = residualCb[i].code;
-         float* vector = residualCb[i].vector;
-         querySimilarities[pos*cbCodes + code] = squareDistance(residualVector+(pos*subvectorSize), vector, subvectorSize);
+     querySimilarities = palloc(sizeof(float*)*cqSize);
+     for (int j = 0; j < param_w; j++){
+       int simId = cqSelection[j].id;
+       querySimilarities[simId] = palloc(cbPositions*cbCodes*sizeof(float));
+       for (int i=0; i< cbPositions*cbCodes; i++){
+           int pos = residualCb[i].pos;
+           int code = residualCb[i].code;
+           float* vector = residualCb[i].vector;
+           querySimilarities[simId][pos*cbCodes + code] = squareDistance(residualVectors[j]+(pos*subvectorSize), vector, subvectorSize);
+       }
      }
 
      end = clock();
@@ -366,7 +384,17 @@ ivfadc_search(PG_FUNCTION_ARGS)
 
       // connect to databse and compute approximated similarities with sum method
       SPI_connect();
-      sprintf(command, "SELECT id, vector FROM %s WHERE coarse_id = %d", tableNameFineQuantization, cq[cqId].id);
+      command = palloc((200+param_w*3)*sizeof(char));
+      cur = command;
+      cur += sprintf(command, "SELECT id, vector, coarse_id FROM %s WHERE coarse_id IN (", tableNameFineQuantization);
+      for (int i = 0; i < param_w; i++){
+        if (i != param_w - 1){
+          cur += sprintf(cur, "%d, ", cqSelection[i].id);
+        } else{
+          cur += sprintf(cur, "%d)", cqSelection[i].id);
+        }
+      }
+      // cq[cqId].id
 
       ret = SPI_exec(command, 0);
       proc = SPI_processed;
@@ -379,19 +407,23 @@ ivfadc_search(PG_FUNCTION_ARGS)
         for (i = 0; i < proc; i++){
           Datum id;
           Datum vector;
+          Datum coarseIdRaw;
           int16* codes;
           int wordId;
+          int coarseId;
           float distance;
 
           HeapTuple tuple = tuptable->vals[i];
           id = SPI_getbinval(tuple, tupdesc, 1, &info);
           vector = SPI_getbinval(tuple, tupdesc, 2, &info);
+          coarseIdRaw = SPI_getbinval(tuple, tupdesc, 3, &info);
           wordId = DatumGetInt32(id);
+          coarseId = DatumGetInt32(coarseIdRaw);
           n = 0;
           convert_bytea_int16(DatumGetByteaP(vector), &codes, &n);
           distance = 0;
           for (int j = 0; j < n; j++){
-            distance += querySimilarities[j*cbCodes + codes[j]];
+            distance += querySimilarities[coarseId][j*cbCodes + codes[j]];
           }
           if (distance < maxDist){
             updateTopK(topK, distance, wordId, k, maxDist);
