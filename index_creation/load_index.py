@@ -60,7 +60,7 @@ def add_to_database(db_config, index_config, type, index_file, logger):
 
 
 def main(argc, argv):
-    db_config = Configuration('db_config.json')
+    db_config = Configuration('config/db_config.json')
     logger = Logger(db_config.get_value('log'))
     index_type = None
     index_config = None
