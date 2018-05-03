@@ -56,6 +56,13 @@ END
 $$
 LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION set_analogy_in_function(name varchar) RETURNS void AS $$
+BEGIN
+EXECUTE format('CREATE OR REPLACE FUNCTION get_analogy_in_function_name() RETURNS varchar AS ''SELECT varchar ''''%s'''''' LANGUAGE sql IMMUTABLE', name);
+END
+$$
+LANGUAGE plpgsql;
+
 CREATE OR REPLACE FUNCTION set_groups_function(name varchar) RETURNS void AS $$
 BEGIN
 EXECUTE format('CREATE OR REPLACE FUNCTION get_groups_function_name() RETURNS varchar AS ''SELECT varchar ''''%s'''''' LANGUAGE sql IMMUTABLE', name);
@@ -81,6 +88,7 @@ SELECT set_knn_function('k_nearest_neighbour');
 SELECT set_knn_in_function('knn_in_exact');
 SELECT set_knn_batch_function('k_nearest_neighbour_ivfadc_batch');
 SELECT set_analogy_function('analogy_3cosadd');
+SELECT set_analogy_in_function('analogy_3cosadd_in');
 SELECT set_groups_function('grouping_func');
 
 
@@ -92,7 +100,7 @@ BEGIN
 EXECUTE 'SELECT get_knn_function_name()' INTO function_name;
 RETURN QUERY EXECUTE format('
 SELECT * FROM %s(''%s'', %s)
-', function_name, query, k);
+', function_name,  replace(query, '''', ''''''), k);
 END
 $$
 LANGUAGE plpgsql;
@@ -100,11 +108,15 @@ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION knn_in(query varchar(100), k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 function_name varchar;
+formated varchar(100)[];
 BEGIN
+FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
+  formated[I] = replace(input_set[I], '''', '''''');
+END LOOP;
 EXECUTE 'SELECT get_knn_in_function_name()' INTO function_name;
 RETURN QUERY EXECUTE format('
 SELECT * FROM %s(''%s'', %s, ''%s''::varchar[])
-', function_name, query, k, input_set);
+', function_name,  replace(query, '''', ''''''), k, formated);
 END
 $$
 LANGUAGE plpgsql;
@@ -112,11 +124,15 @@ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION knn_batch(query_set varchar(100)[], k integer) RETURNS TABLE (query varchar(100), target varchar(100), squareDistance float4) AS $$
 DECLARE
 function_name varchar;
+formated varchar(100)[];
 BEGIN
+FOR I IN array_lower(query_set, 1)..array_upper(query_set, 1) LOOP
+  formated[I] = replace(query_set[I], '''', '''''');
+END LOOP;
 EXECUTE 'SELECT get_knn_batch_function_name()' INTO function_name;
 RETURN QUERY EXECUTE format('
 SELECT * FROM %s(''%s'', %s)
-', function_name, query_set, k);
+', function_name, formated, k);
 END
 $$
 LANGUAGE plpgsql;
@@ -128,7 +144,24 @@ BEGIN
 EXECUTE 'SELECT get_analogy_function_name()' INTO function_name;
 RETURN QUERY EXECUTE format('
 SELECT * FROM %s(''%s'', ''%s'',''%s'')
-', function_name, a, b, c);
+', function_name, replace(a, '''', ''''''), replace(b, '''', ''''''), replace(c, '''', ''''''));
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION analogy_in(w1 varchar(100), w2 varchar(100), w3 varchar(100), input_set varchar(100)[]) RETURNS TABLE (target varchar(100)) AS $$
+DECLARE
+function_name varchar;
+formated varchar(100)[];
+BEGIN
+FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
+  formated[I] = replace(input_set[I], '''', '''''');
+END LOOP;
+-- replace(token, '''', '''''')
+EXECUTE 'SELECT get_analogy_in_function_name()' INTO function_name;
+RETURN QUERY EXECUTE format('
+SELECT * FROM %s(''%s'', ''%s'',''%s'', ''%s''::varchar[])
+', function_name, replace(w1, '''', ''''''), replace(w2, '''', ''''''), replace(w3, '''', ''''''), formated);
 END
 $$
 LANGUAGE plpgsql;
@@ -136,11 +169,19 @@ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION groups(tokens varchar[], groups varchar[]) RETURNS TABLE (token varchar(100), grouptoken varchar(100)) AS $$
 DECLARE
 function_name varchar;
+formated_tokens varchar(100)[];
+formated_groups varchar(100)[];
 BEGIN
+FOR I IN array_lower(tokens, 1)..array_upper(tokens, 1) LOOP
+  formated_tokens[I] = replace(tokens[I], '''', '''''');
+END LOOP;
+FOR I IN array_lower(groups, 1)..array_upper(groups, 1) LOOP
+  formated_groups[I] = replace(groups[I], '''', '''''');
+END LOOP;
 EXECUTE 'SELECT get_groups_function_name()' INTO function_name;
 RETURN QUERY EXECUTE format('
 SELECT * FROM %s(''%s''::varchar[], ''%s''::varchar[])
-', function_name, tokens, groups);
+', function_name, formated_tokens, formated_groups);
 END
 $$
 LANGUAGE plpgsql;
