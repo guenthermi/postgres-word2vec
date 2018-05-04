@@ -82,7 +82,7 @@ IF init_done = 0 AND number_tables = 7 THEN
 END IF;
 END$$;
 
-SELECT set_pvf(1000);
+SELECT set_pvf(20);
 SELECT set_w(3);
 SELECT set_knn_function('k_nearest_neighbour');
 SELECT set_knn_in_function('knn_in_exact');
@@ -373,7 +373,7 @@ INNER JOIN %s AS v2 ON idx = v2.id
 WHERE v1.word = ''%s''
 ORDER BY cosine_similarity_bytea(v1.vector, v2.vector) DESC
 FETCH FIRST %s ROWS ONLY
-', table_name, post_verif, table_name, replace(token, '''', ''''''), k);
+', table_name, post_verif*k, table_name, replace(token, '''', ''''''), k);
 END
 $$
 LANGUAGE plpgsql;
@@ -392,7 +392,7 @@ FROM ivfadc_search(''%s''::float4[], %s) AS (idx integer, distance float4)
 INNER JOIN %s AS fq ON idx = fq.id
 ORDER BY cosine_similarity_bytea(''%s''::float4[], fq.word) DESC
 FETCH FIRST %s ROWS ONLY
-', input_vector, post_verif, fine_quantization_name, input_vector, k);
+', input_vector, post_verif*k, fine_quantization_name, input_vector, k);
 END
 $$
 LANGUAGE plpgsql;
@@ -443,7 +443,7 @@ FROM pq_search(''%s''::float4[], %s) AS (idx integer, distance float4)
 INNER JOIN %s AS pqs ON idx = pqs.id
 ORDER BY cosine_similarity_bytea(''%s''::float4[], pqs.word) DESC
 FETCH FIRST %s ROWS ONLY
-', input_vector, post_verif, pq_quantization_name, input_vector, k);
+', input_vector, post_verif*k, pq_quantization_name, input_vector, k);
 END
 $$
 LANGUAGE plpgsql;
@@ -465,7 +465,7 @@ INNER JOIN %s AS pqs ON idx = pqs.id
 WHERE wv.word = ''%s''
 ORDER BY cosine_similarity_bytea(wv.vector, pqs.word) DESC
 FETCH FIRST %s ROWS ONLY
-', table_name, post_verif, pq_quantization_name, replace(token, '''', ''''''), k);
+', table_name, post_verif*k, pq_quantization_name, replace(token, '''', ''''''), k);
 END
 $$
 LANGUAGE plpgsql;
@@ -807,15 +807,17 @@ AS  $$
 DECLARE
 table_name varchar;
 pq_quantization_name varchar;
+post_verif integer;
 BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
+EXECUTE 'SELECT get_pvf()' INTO post_verif;
 EXECUTE 'SELECT get_vecs_name_pq_quantization()' INTO pq_quantization_name;
 EXECUTE format('
 SELECT pqs.word FROM
 %s AS v1,
 %s AS v2,
 %s AS v3,
-pq_search(vec_normalize_bytea(vec_plus_bytea(vec_minus_bytea(v3.vector, v1.vector), v2.vector)), 100) AS (idx integer, distance float4)
+pq_search(vec_normalize_bytea(vec_plus_bytea(vec_minus_bytea(v3.vector, v1.vector), v2.vector)), %s) AS (idx integer, distance float4)
 INNER JOIN %s AS pqs ON idx = pqs.id
 INNER JOIN %s AS v4 ON v4.word = pqs.word
 WHERE (v1.word = ''%s'')
@@ -826,7 +828,7 @@ AND (pqs.word != v2.word)
 AND (pqs.word != v3.word)
 ORDER BY cosine_similarity_bytea(vec_plus_bytea(vec_minus_bytea(v3.vector, v1.vector), v2.vector), v4.vector) DESC
 FETCH FIRST 1 ROWS ONLY
-', table_name, table_name, table_name, pq_quantization_name, table_name, replace(w1, '''', ''''''), replace(w2, '''', ''''''), replace(w3, '''', '''''')) INTO result;
+', table_name, table_name, table_name, post_verif+3, pq_quantization_name, table_name, replace(w1, '''', ''''''), replace(w2, '''', ''''''), replace(w3, '''', '''''')) INTO result;
 END
 $$
 LANGUAGE plpgsql;
@@ -837,9 +839,11 @@ DECLARE
 table_name varchar;
 pq_quantization_name varchar;
 formated varchar(100)[];
+post_verif integer;
 BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 EXECUTE 'SELECT get_vecs_name_pq_quantization()' INTO pq_quantization_name;
+EXECUTE 'SELECT get_pvf()' INTO post_verif;
 FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
   formated[I] = replace(input_set[I], '''', '''''');
 END LOOP;
@@ -848,7 +852,7 @@ SELECT pqs.word FROM
 %s AS v1,
 %s AS v2,
 %s AS v3,
-pq_search_in(vec_normalize_bytea(vec_plus_bytea(vec_minus_bytea(v3.vector, v1.vector), v2.vector)), 100, ARRAY(SELECT id FROM %s WHERE word = ANY (''%s''::varchar[]))) AS (idx integer, distance float4)
+pq_search_in(vec_normalize_bytea(vec_plus_bytea(vec_minus_bytea(v3.vector, v1.vector), v2.vector)), %s, ARRAY(SELECT id FROM %s WHERE word = ANY (''%s''::varchar[]))) AS (idx integer, distance float4)
 INNER JOIN %s AS pqs ON idx = pqs.id
 INNER JOIN %s AS v4 ON v4.word = pqs.word
 WHERE (v1.word = ''%s'')
@@ -859,7 +863,7 @@ AND (pqs.word != v2.word)
 AND (pqs.word != v3.word)
 ORDER BY cosine_similarity_bytea(vec_plus_bytea(vec_minus_bytea(v3.vector, v1.vector), v2.vector), v4.vector) DESC
 FETCH FIRST 1 ROWS ONLY
-', table_name, table_name, table_name, pq_quantization_name, formated, pq_quantization_name, table_name, replace(w1, '''', ''''''), replace(w2, '''', ''''''), replace(w3, '''', ''''''), formated) INTO result;
+', table_name, table_name, table_name, post_verif+3, pq_quantization_name, formated, pq_quantization_name, table_name, replace(w1, '''', ''''''), replace(w2, '''', ''''''), replace(w3, '''', ''''''), formated) INTO result;
 END
 $$
 LANGUAGE plpgsql;
@@ -871,16 +875,18 @@ DECLARE
 table_name varchar;
 pq_quantization_name varchar;
 fine_quantization_name varchar;
+post_verif integer;
 BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 EXECUTE 'SELECT get_vecs_name_pq_quantization()' INTO pq_quantization_name;
 EXECUTE 'SELECT get_vecs_name_residual_quantization()' INTO fine_quantization_name;
+EXECUTE 'SELECT get_pvf()' INTO post_verif;
 EXECUTE format('
 SELECT fq.word FROM
 %s AS v1,
 %s AS v2,
 %s AS v3,
-ivfadc_search(vec_normalize_bytea(vec_plus_bytea(vec_minus_bytea(v3.vector, v1.vector), v2.vector)), 100) AS (idx integer, distance float4)
+ivfadc_search(vec_normalize_bytea(vec_plus_bytea(vec_minus_bytea(v3.vector, v1.vector), v2.vector)), %s) AS (idx integer, distance float4)
 INNER JOIN %s AS fq ON idx = fq.id
 INNER JOIN %s AS v4 ON v4.word = fq.word
 WHERE (v1.word = ''%s'')
@@ -891,7 +897,7 @@ AND (fq.word != v2.word)
 AND (fq.word != v3.word)
 ORDER BY cosine_similarity_bytea(vec_plus_bytea(vec_minus_bytea(v3.vector, v1.vector), v2.vector), v4.vector) DESC
 FETCH FIRST 1 ROWS ONLY
-', table_name, table_name, table_name, fine_quantization_name, table_name, replace(w1, '''', ''''''), replace(w2, '''', ''''''), replace(w3, '''', '''''')) INTO result;
+', table_name, table_name, table_name, post_verif+3, fine_quantization_name, table_name, replace(w1, '''', ''''''), replace(w2, '''', ''''''), replace(w3, '''', '''''')) INTO result;
 END
 $$
 LANGUAGE plpgsql;
