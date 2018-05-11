@@ -93,7 +93,7 @@ SELECT set_groups_function('grouping_func');
 
 
 
-CREATE OR REPLACE FUNCTION knn(query varchar, k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
+CREATE OR REPLACE FUNCTION knn(query varchar(100), k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 function_name varchar;
 BEGIN
@@ -108,14 +108,14 @@ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION knn_in(query varchar(100), k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 function_name varchar;
-formated varchar(100)[];
+formated varchar[];
 BEGIN
 FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
   formated[I] = replace(input_set[I], '''', '''''');
 END LOOP;
 EXECUTE 'SELECT get_knn_in_function_name()' INTO function_name;
 RETURN QUERY EXECUTE format('
-SELECT * FROM %s(''%s'', %s, ''%s''::varchar[])
+SELECT * FROM %s(''%s'', %s, ''%s''::varchar(100)[])
 ', function_name,  replace(query, '''', ''''''), k, formated);
 END
 $$
@@ -124,7 +124,7 @@ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION knn_batch(query_set varchar(100)[], k integer) RETURNS TABLE (query varchar(100), target varchar(100), squareDistance float4) AS $$
 DECLARE
 function_name varchar;
-formated varchar(100)[];
+formated varchar[];
 BEGIN
 FOR I IN array_lower(query_set, 1)..array_upper(query_set, 1) LOOP
   formated[I] = replace(query_set[I], '''', '''''');
@@ -137,40 +137,40 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION analogy(a varchar(100),b varchar(100),c varchar(100)) RETURNS TABLE (target varchar(100)) AS $$
+CREATE OR REPLACE FUNCTION analogy(a varchar(100),b varchar(100),c varchar(100), OUT result varchar(100)) AS $$
 DECLARE
 function_name varchar;
 BEGIN
 EXECUTE 'SELECT get_analogy_function_name()' INTO function_name;
-RETURN QUERY EXECUTE format('
+EXECUTE format('
 SELECT * FROM %s(''%s'', ''%s'',''%s'')
-', function_name, replace(a, '''', ''''''), replace(b, '''', ''''''), replace(c, '''', ''''''));
+', function_name, replace(a, '''', ''''''), replace(b, '''', ''''''), replace(c, '''', '''''')) INTO result;
 END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION analogy_in(w1 varchar(100), w2 varchar(100), w3 varchar(100), input_set varchar(100)[]) RETURNS TABLE (target varchar(100)) AS $$
+CREATE OR REPLACE FUNCTION analogy_in(w1 varchar(100), w2 varchar(100), w3 varchar(100), input_set varchar(100)[], OUT result varchar(100)) AS $$
 DECLARE
 function_name varchar;
-formated varchar(100)[];
+formated varchar[];
 BEGIN
 FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
   formated[I] = replace(input_set[I], '''', '''''');
 END LOOP;
 -- replace(token, '''', '''''')
 EXECUTE 'SELECT get_analogy_in_function_name()' INTO function_name;
-RETURN QUERY EXECUTE format('
-SELECT * FROM %s(''%s'', ''%s'',''%s'', ''%s''::varchar[])
-', function_name, replace(w1, '''', ''''''), replace(w2, '''', ''''''), replace(w3, '''', ''''''), formated);
+EXECUTE format('
+SELECT * FROM %s(''%s'', ''%s'',''%s'', ''%s''::varchar(100)[])
+', function_name, replace(w1, '''', ''''''), replace(w2, '''', ''''''), replace(w3, '''', ''''''), formated) INTO result;
 END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION groups(tokens varchar[], groups varchar[]) RETURNS TABLE (token varchar(100), grouptoken varchar(100)) AS $$
+CREATE OR REPLACE FUNCTION groups(tokens varchar(100)[], groups varchar(100)[]) RETURNS TABLE (token varchar(100), grouptoken varchar(100)) AS $$
 DECLARE
 function_name varchar;
-formated_tokens varchar(100)[];
-formated_groups varchar(100)[];
+formated_tokens varchar[];
+formated_groups varchar[];
 BEGIN
 FOR I IN array_lower(tokens, 1)..array_upper(tokens, 1) LOOP
   formated_tokens[I] = replace(tokens[I], '''', '''''');
@@ -180,7 +180,7 @@ FOR I IN array_lower(groups, 1)..array_upper(groups, 1) LOOP
 END LOOP;
 EXECUTE 'SELECT get_groups_function_name()' INTO function_name;
 RETURN QUERY EXECUTE format('
-SELECT * FROM %s(''%s''::varchar[], ''%s''::varchar[])
+SELECT * FROM %s(''%s''::varchar(100)[], ''%s''::varchar(100)[])
 ', function_name, formated_tokens, formated_groups);
 END
 $$
@@ -341,7 +341,7 @@ CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc_batch(input_set varchar(10
 DECLARE
 table_name varchar;
 fine_quantization_name varchar;
-formated varchar(100)[];
+formated varchar[];
 BEGIN
 FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
   formated[I] = replace(input_set[I], '''', '''''');
@@ -508,7 +508,7 @@ CREATE OR REPLACE FUNCTION knn_in_pq(token varchar(100), k integer, input_set va
 DECLARE
 table_name varchar;
 pq_quantization_name varchar;
-formated varchar(100)[];
+formated varchar[];
 BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 EXECUTE 'SELECT get_vecs_name_pq_quantization()' INTO pq_quantization_name;
@@ -530,7 +530,7 @@ CREATE OR REPLACE FUNCTION knn_in_pq(query_vector bytea, k integer, input_set va
 DECLARE
 table_name varchar;
 pq_quantization_name varchar;
-formated varchar(100)[];
+formated varchar[];
 BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 EXECUTE 'SELECT get_vecs_name_pq_quantization()' INTO pq_quantization_name;
@@ -636,7 +636,7 @@ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION knn_in_exact(token varchar(100), k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;
-formated varchar(100)[];
+formated varchar[];
 BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 -- execute replace on every element of input set
@@ -658,7 +658,7 @@ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION knn_in_exact(query_vector bytea, k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;
-formated varchar(100)[];
+formated varchar[];
 BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 -- execute replace on every element of input set
@@ -679,7 +679,7 @@ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION cluster_pq(tokens varchar(100)[], k integer) RETURNS  TABLE (words varchar(100)[]) AS $$
 DECLARE
 table_name varchar;
-formated varchar(100)[];
+formated varchar[];
 BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 FOR I IN array_lower(tokens, 1)..array_upper(tokens, 1) LOOP
@@ -688,7 +688,7 @@ END LOOP;
 
 RETURN QUERY EXECUTE format('
 SELECT array_agg(word)
-FROM %s, cluster_pq_to_id(ARRAY(SELECT id FROM %s WHERE word = ANY (''%s''::varchar[])), %s) AS (centroid float4[], ids int[])
+FROM %s, cluster_pq_to_id(ARRAY(SELECT id FROM %s WHERE word = ANY (''%s''::varchar(100)[])), %s) AS (centroid float4[], ids int[])
 WHERE id = ANY ((ids)::integer[])
 GROUP BY centroid;
 ', table_name, table_name, formated, k);
@@ -779,7 +779,7 @@ CREATE OR REPLACE FUNCTION analogy_3cosadd_in(w1 varchar(100), w2 varchar(100), 
 AS  $$
 DECLARE
 table_name varchar;
-formated varchar(100)[];
+formated varchar[];
 command varchar;
 test varchar;
 BEGIN
@@ -793,7 +793,7 @@ FROM %s AS v4
 INNER JOIN %s AS v1 ON v1.word = ''%s''
 INNER JOIN %s AS v2 ON v2.word = ''%s''
 INNER JOIN %s AS v3 ON v3.word = ''%s''
-WHERE (v4.word NOT IN (''%s'', ''%s'', ''%s'')) AND (v4.word = ANY (''%s''::varchar[]))
+WHERE (v4.word NOT IN (''%s'', ''%s'', ''%s'')) AND (v4.word = ANY (''%s''::varchar(100)[]))
 ORDER BY cosine_similarity_bytea(vec_plus_bytea(vec_minus_bytea(v3.vector, v1.vector), v2.vector), v4.vector) DESC
 FETCH FIRST 1 ROWS ONLY
 ', table_name, table_name, replace(w1, '''', ''''''), table_name, replace(w2, '''', ''''''), table_name, replace(w3, '''', ''''''), replace(w1, '''', ''''''), replace(w2, '''', ''''''), replace(w3, '''', ''''''), formated) INTO result;
@@ -838,7 +838,7 @@ AS  $$
 DECLARE
 table_name varchar;
 pq_quantization_name varchar;
-formated varchar(100)[];
+formated varchar[];
 post_verif integer;
 BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
@@ -852,7 +852,7 @@ SELECT pqs.word FROM
 %s AS v1,
 %s AS v2,
 %s AS v3,
-pq_search_in(vec_normalize_bytea(vec_plus_bytea(vec_minus_bytea(v3.vector, v1.vector), v2.vector)), %s, ARRAY(SELECT id FROM %s WHERE word = ANY (''%s''::varchar[]))) AS (idx integer, distance float4)
+pq_search_in(vec_normalize_bytea(vec_plus_bytea(vec_minus_bytea(v3.vector, v1.vector), v2.vector)), %s, ARRAY(SELECT id FROM %s WHERE word = ANY (''%s''::varchar(100)[]))) AS (idx integer, distance float4)
 INNER JOIN %s AS pqs ON idx = pqs.id
 INNER JOIN %s AS v4 ON v4.word = pqs.word
 WHERE (v1.word = ''%s'')
@@ -920,8 +920,8 @@ END LOOP;
 RETURN QUERY EXECUTE format('
 SELECT v1.word, gt.word
 FROM %s AS v1,
-knn_in(v1.word, 1, ''%s''::varchar[]) AS gt
-WHERE v1.word = ANY(''%s''::varchar[])
+knn_in(v1.word, 1, ''%s''::varchar(100)[]) AS gt
+WHERE v1.word = ANY(''%s''::varchar(100)[])
 ', table_name, groups_formated, tokens_formated);
 END
 $$
