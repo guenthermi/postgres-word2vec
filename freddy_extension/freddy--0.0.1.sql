@@ -305,7 +305,7 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc(token varchar(100), k integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc(token varchar(100), k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;
 fine_quantization_name varchar;
@@ -313,7 +313,7 @@ BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 EXECUTE 'SELECT get_vecs_name_residual_quantization()' INTO fine_quantization_name;
 RETURN QUERY EXECUTE format('
-SELECT fq.word, distance
+SELECT fq.word, (1.0 - (distance / 2.0))::float4
 FROM %s AS gv, ivfadc_search(gv.vector, %s) AS (idx integer, distance float4)
 INNER JOIN %s AS fq ON idx = fq.id
 WHERE gv.word = ''%s''
@@ -322,13 +322,13 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc(input_vector bytea, k integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc(input_vector bytea, k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 fine_quantization_name varchar;
 BEGIN
 EXECUTE 'SELECT get_vecs_name_residual_quantization()' INTO fine_quantization_name;
 RETURN QUERY EXECUTE format('
-SELECT fq.word, distance
+SELECT fq.word, (1.0 - (distance / 2.0))::float4
 FROM ivfadc_search(''%s'', %s) AS (idx integer, distance float4)
 INNER JOIN %s AS fq ON idx = fq.id
 ', input_vector, k, fine_quantization_name);
@@ -337,7 +337,7 @@ $$
 LANGUAGE plpgsql;
 
 -- ivfadc_batch_search(
-CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc_batch(input_set varchar(100)[], k integer) RETURNS TABLE (query varchar(100), target varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc_batch(input_set varchar(100)[], k integer) RETURNS TABLE (query varchar(100), target varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;
 fine_quantization_name varchar;
@@ -349,7 +349,7 @@ END LOOP;
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 EXECUTE 'SELECT get_vecs_name_residual_quantization()' INTO fine_quantization_name;
 RETURN QUERY EXECUTE format('
-SELECT fq.word, fq2.word, distance
+SELECT fq.word, fq2.word, (1.0 - (distance / 2.0))::float4
 FROM ivfadc_batch_search(ARRAY(SELECT id FROM %s WHERE word = ANY (''%s'')), %s) AS (idx integer, idxx integer, distance float4)
 INNER JOIN %s AS fq ON idx = fq.id
 INNER JOIN %s AS fq2 ON idxx = fq2.id
@@ -359,7 +359,7 @@ $$
 LANGUAGE plpgsql;
 
 -- TODO ADAPT
-CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc_pv(token varchar(100), k integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc_pv(token varchar(100), k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;
 post_verif integer;
@@ -367,7 +367,7 @@ BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 EXECUTE 'SELECT get_pvf()' INTO post_verif;
 RETURN QUERY EXECUTE format('
-SELECT v2.word, distance
+SELECT v2.word, cosine_similarity_bytea(v1.vector, v2.vector)
 FROM %s AS v1, ivfadc_search(v1.vector, %s) AS (idx integer, distance float4)
 INNER JOIN %s AS v2 ON idx = v2.id
 WHERE v1.word = ''%s''
@@ -379,7 +379,7 @@ $$
 LANGUAGE plpgsql;
 
 -- TODO ADAPT
-CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc_pv(input_vector anyarray, k integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc_pv(input_vector anyarray, k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 fine_quantization_name varchar;
 post_verif integer;
@@ -387,7 +387,7 @@ BEGIN
 EXECUTE 'SELECT get_vecs_name_residual_quantization()' INTO fine_quantization_name;
 EXECUTE 'SELECT get_pvf()' INTO post_verif;
 RETURN QUERY EXECUTE format('
-SELECT fq.word, distance
+SELECT fq.word, cosine_similarity_bytea(v1.vector, v2.vector)
 FROM ivfadc_search(''%s''::float4[], %s) AS (idx integer, distance float4)
 INNER JOIN %s AS fq ON idx = fq.id
 ORDER BY cosine_similarity_bytea(''%s''::float4[], fq.word) DESC
@@ -397,7 +397,7 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION k_nearest_neighbour_pq(token varchar(100), k integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION k_nearest_neighbour_pq(token varchar(100), k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;
 pq_quantization_name varchar;
@@ -405,7 +405,7 @@ BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 EXECUTE 'SELECT get_vecs_name_pq_quantization()' INTO pq_quantization_name;
 RETURN QUERY EXECUTE format('
-SELECT pqs.word AS word, distance AS distance
+SELECT pqs.word AS word, (1.0 - (distance / 2.0))::float4 AS similarity
 FROM %s AS gv, pq_search(gv.vector, %s) AS (idx integer, distance float4)
 INNER JOIN %s AS pqs ON idx = pqs.id
 WHERE gv.word = ''%s''
@@ -414,13 +414,13 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION k_nearest_neighbour_pq(input_vector bytea, k integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION k_nearest_neighbour_pq(input_vector bytea, k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 pq_quantization_name varchar;
 BEGIN
 EXECUTE 'SELECT get_vecs_name_pq_quantization()' INTO pq_quantization_name;
 RETURN QUERY EXECUTE format('
-SELECT pqs.word AS word, distance AS distance
+SELECT pqs.word AS word, (1.0 - (distance / 2.0))::float4 AS similarity
 FROM pq_search(''%s'', %s) AS (idx integer, distance float4)
 INNER JOIN %s AS pqs ON idx = pqs.id
 ', input_vector, k, pq_quantization_name);
@@ -430,7 +430,7 @@ LANGUAGE plpgsql;
 
 -- TODO ADAPT
 -- with postverification
-CREATE OR REPLACE FUNCTION k_nearest_neighbour_pq_pv(input_vector anyarray, k integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION k_nearest_neighbour_pq_pv(input_vector anyarray, k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 pq_quantization_name varchar;
 post_verif integer;
@@ -438,7 +438,7 @@ BEGIN
 EXECUTE 'SELECT get_vecs_name_pq_quantization()' INTO pq_quantization_name;
 EXECUTE 'SELECT get_pvf()' INTO post_verif;
 RETURN QUERY EXECUTE format('
-SELECT pqs.word AS word, distance AS distance
+SELECT pqs.word AS word, cosine_similarity_bytea(''%s''::float4[], pqs.word) AS similarity
 FROM pq_search(''%s''::float4[], %s) AS (idx integer, distance float4)
 INNER JOIN %s AS pqs ON idx = pqs.id
 ORDER BY cosine_similarity_bytea(''%s''::float4[], pqs.word) DESC
@@ -449,7 +449,7 @@ $$
 LANGUAGE plpgsql;
 
 -- TODO ADAPT
-CREATE OR REPLACE FUNCTION k_nearest_neighbour_pq_pv(token varchar(100), k integer) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION k_nearest_neighbour_pq_pv(token varchar(100), k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;
 pq_quantization_name varchar;
@@ -459,7 +459,7 @@ EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 EXECUTE 'SELECT get_vecs_name_pq_quantization()' INTO pq_quantization_name;
 EXECUTE 'SELECT get_pvf()' INTO post_verif;
 RETURN QUERY EXECUTE format('
-SELECT pqs.word AS word, distance AS distance
+SELECT pqs.word AS word,  cosine_similarity_bytea(wv.vector, pqs.word) AS similarity
 FROM %s as wv, pq_search(wv.vector, %s) AS (idx integer, distance float4)
 INNER JOIN %s AS pqs ON idx = pqs.id
 WHERE wv.word = ''%s''
@@ -470,7 +470,7 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION knn_in_pq(token varchar(100), k integer, input_set integer[]) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION knn_in_pq(token varchar(100), k integer, input_set integer[]) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;
 pq_quantization_name varchar;
@@ -479,7 +479,7 @@ EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 EXECUTE 'SELECT get_vecs_name_pq_quantization()' INTO pq_quantization_name;
 
 RETURN QUERY EXECUTE format('
-SELECT pqs.word, distance
+SELECT pqs.word, (1.0 - (distance / 2.0))::float4
 FROM %s AS gv, pq_search_in(gv.vector, %s, ''%s''::int[]) AS (result_id integer, distance float4)
 INNER JOIN %s AS pqs ON result_id = pqs.id
 WHERE gv.word = ''%s''
@@ -488,7 +488,7 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION knn_in_pq(query_vector anyarray, k integer, input_set integer[]) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION knn_in_pq(query_vector anyarray, k integer, input_set integer[]) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;
 pq_quantization_name varchar;
@@ -496,7 +496,7 @@ BEGIN
 EXECUTE 'SELECT get_vecs_name_pq_quantization()' INTO pq_quantization_name;
 
 RETURN QUERY EXECUTE format('
-SELECT pqs.word, distance
+SELECT pqs.word, (1.0 - (distance / 2.0))::float4
 FROM pq_search_in(''%s''::float4[], %s, ''%s''::int[]) AS (result_id integer, distance float4)
 INNER JOIN %s AS pqs ON result_id = pqs.id
 ', query_vector, k, input_set, pq_quantization_name);
@@ -504,7 +504,7 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION knn_in_pq(token varchar(100), k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION knn_in_pq(token varchar(100), k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;
 pq_quantization_name varchar;
@@ -517,7 +517,7 @@ FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
 END LOOP;
 
 RETURN QUERY EXECUTE format('
-SELECT pqs.word, distance
+SELECT pqs.word, (1.0 - (distance / 2.0))::float4
 FROM %s AS gv, pq_search_in(gv.vector, %s, ARRAY(SELECT id FROM %s WHERE word = ANY (''%s''::varchar(100)[]))) AS (result_id integer, distance float4)
 INNER JOIN %s AS pqs ON result_id = pqs.id
 WHERE gv.word = ''%s''
@@ -526,7 +526,7 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION knn_in_pq(query_vector bytea, k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION knn_in_pq(query_vector bytea, k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;
 pq_quantization_name varchar;
@@ -539,7 +539,7 @@ FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
 END LOOP;
 
 RETURN QUERY EXECUTE format('
-SELECT pqs.word, distance
+SELECT pqs.word, (1.0 - (distance / 2.0))::float4
 FROM pq_search_in(''%s'', %s, ARRAY(SELECT id FROM %s WHERE word = ANY (''%s''::varchar(100)[]))) AS (result_id integer, distance float4)
 INNER JOIN %s AS pqs ON result_id = pqs.id
 ', query_vector, k, table_name, formated, pq_quantization_name);

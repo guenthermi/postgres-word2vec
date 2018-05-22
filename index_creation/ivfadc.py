@@ -95,8 +95,8 @@ def create_index_with_faiss(vectors, cq, codebook, logger):
                 logger.log(Logger.INFO, 'vec ' + str(vec) + ' i ' +  str(i) +  ' m ' + str(m) + ' count ' + str(count))
                 time1 += 100000
             batches[i].append(partition[i])
-        if (count % 40 == 0) or (c == (len(vectors)-1)): #  seems to be a good value
-            size = 40 if (count % 40 == 0) else (c+1) % 40
+        if (count % 18 == 0) or (c == (len(vectors)-1)): #  seems to be a good value
+            size = 18 if (count % 18 == 0) else (c+1) % 18
             codes=[(coarse_ids[i],[]) for i in range(size)]
             for i in range(m):
                 _, I = indices[i].search(np.array(batches[i]), 1)

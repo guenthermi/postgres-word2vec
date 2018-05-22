@@ -20,7 +20,12 @@ def get_vectors(filename, logger, max_count=10**9, normalization=True):
         if not line_splits:
             break
         word = line_splits[0]
-        vector = [float(elem) for elem in line_splits[1:]]
+        vector = []
+        for elem in line_splits[1:]:
+            try:
+                vector.append(float(elem))
+            except:
+                break
         if normalization:
             v_len = np.linalg.norm(vector)
             vector = [x / v_len for x in vector]
