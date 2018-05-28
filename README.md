@@ -135,7 +135,7 @@ Execute the following code (this can take a while):
 
 ```
 python3 vec2database.py config/vecs_config.json
-python3 vec2database.py config/vecs_config_norm.json
+python3 vec2database.py config/vecs_norm_config.json
 ```
 
 To create the product quantization Index you have to execute "pq_index.py":
