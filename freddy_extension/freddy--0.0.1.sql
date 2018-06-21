@@ -1,7 +1,7 @@
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION freddy" to load this file. \quit
 
-CREATE OR REPLACE FUNCTION init(original regclass, normalized regclass, pq_quantization regclass, codebook regclass, residual_quantization regclass, coarse_quantization regclass, residual_codebook regclass) RETURNS void AS $$
+CREATE OR REPLACE FUNCTION init(original regclass, normalized regclass, pq_quantization regclass, codebook regclass, residual_quantization regclass, coarse_quantization regclass, residual_codebook regclass, residual_quantization_complete regclass) RETURNS void AS $$
 BEGIN
 EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name_original() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', original);
 EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', normalized);
@@ -10,6 +10,7 @@ EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name_codebook() RETURNS regc
 EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name_residual_quantization() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', residual_quantization);
 EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name_coarse_quantization() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', coarse_quantization);
 EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name_residual_codebook() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', residual_codebook);
+EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name_residual_quantization_complete() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', residual_quantization_complete);
 END
 $$
 LANGUAGE plpgsql;
@@ -76,9 +77,9 @@ init_done int;
 number_tables int;
 BEGIN
 EXECUTE 'SELECT count(proname) FROM pg_proc WHERE proname=''get_vecs_name''' INTO init_done;
-EXECUTE 'SELECT count(*) FROM information_schema.tables WHERE table_schema=''public'' AND table_type=''BASE TABLE'' AND table_name in (''google_vecs'', ''google_vecs_norm'', ''pq_quantization'', ''pq_codebook'', ''fine_quantization'', ''coarse_quantization'', ''residual_codebook'')' INTO number_tables;
-IF init_done = 0 AND number_tables = 7 THEN
-  EXECUTE 'SELECT init(''google_vecs'', ''google_vecs_norm'', ''pq_quantization'', ''pq_codebook'', ''fine_quantization'', ''coarse_quantization'', ''residual_codebook'')';
+EXECUTE 'SELECT count(*) FROM information_schema.tables WHERE table_schema=''public'' AND table_type=''BASE TABLE'' AND table_name in (''google_vecs'', ''google_vecs_norm'', ''pq_quantization'', ''pq_codebook'', ''fine_quantization'', ''coarse_quantization'', ''residual_codebook'', ''fine_quantization_complete'')' INTO number_tables;
+IF init_done = 0 AND number_tables = 8 THEN
+  EXECUTE 'SELECT init(''google_vecs'', ''google_vecs_norm'', ''pq_quantization'', ''pq_codebook'', ''fine_quantization'', ''coarse_quantization'', ''residual_codebook'', ''fine_quantization_complete'')';
 END IF;
 END$$;
 
@@ -234,6 +235,11 @@ LANGUAGE C IMMUTABLE STRICT;
 CREATE OR REPLACE FUNCTION pq_search_in(bytea, integer, integer[]) RETURNS SETOF record
 AS '$libdir/freddy', 'pq_search_in'
 LANGUAGE C IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION ivfadc_search_in(bytea[], integer[], integer, varchar[]) RETURNS SETOF record
+AS '$libdir/freddy', 'ivfadc_search_in'
+LANGUAGE C IMMUTABLE STRICT;
+
 
 CREATE OR REPLACE FUNCTION ivfadc_batch_search(integer[], integer) RETURNS SETOF record
 AS '$libdir/freddy', 'ivfadc_batch_search'
@@ -484,6 +490,27 @@ FROM %s AS gv, pq_search_in(gv.vector, %s, ''%s''::int[]) AS (result_id integer,
 INNER JOIN %s AS pqs ON result_id = pqs.id
 WHERE gv.word = ''%s''
 ', table_name, k, input_set, pq_quantization_name, replace(token, '''', ''''''));
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION knn_in_ivfadc(token varchar(100), k integer, input_set varchar[]) RETURNS TABLE (word varchar(100), similarity float4) AS $$
+DECLARE
+table_name varchar;
+fine_quantization_complete_name varchar;
+formated varchar[];
+BEGIN
+EXECUTE 'SELECT get_vecs_name()' INTO table_name;
+EXECUTE 'SELECT get_vecs_name_residual_quantization_complete()' INTO fine_quantization_complete_name;
+
+FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
+  formated[I] = replace(input_set[I], '''', '''''');
+END LOOP;
+
+RETURN QUERY EXECUTE format('
+SELECT word, (1.0 - (distance / 2.0))::float4 as similarity
+FROM ivfadc_search_in(ARRAY(SELECT vector FROM %s WHERE word = ''%s''), ''{0}'', ''%s''::int, ''%s''::varchar(100)[]) AS (qid integer, tid integer, distance float4) INNER JOIN %s AS f ON tid = f.id;
+', table_name, replace(token, '''', ''''''), k, formated, fine_quantization_complete_name);
 END
 $$
 LANGUAGE plpgsql;

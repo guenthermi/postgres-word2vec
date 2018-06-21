@@ -1,0 +1,18 @@
+{
+  "m": 5,
+  "k": 256,
+  "k_coarse": 32,
+  "train_size_coarse": 1000,
+  "train_size_fine": 1000,
+  "coarse_table_name": "coarse_quantization_complete",
+  "fine_table_name": "fine_quantization_complete",
+  "cb_table_name": "residual_codebook_complete",
+  "fine_word_index_name": "fine_quantization_complete_word_idx",
+  "fine_coarse_index_name": "fine_quantization_complete_coarse_id_idx",
+  "fine_order_index_name": "fine_quantization_complete_coarse_order_idx",
+  "vec_file_path": "../vectors/glove.twitter.27B.25d.txt",
+  "add_to_database": true,
+  "export_filename": "",
+  "pipeline": false,
+  "export_pipeline_data": ""
+}

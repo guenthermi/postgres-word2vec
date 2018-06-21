@@ -336,7 +336,9 @@ void getTableName(tableType type, char* name, int bufferSize){
     "get_vecs_name_codebook()",
     "get_vecs_name_residual_quantization()",
     "get_vecs_name_coarse_quantization()",
-    "get_vecs_name_residual_codebook()"};
+    "get_vecs_name_residual_codebook()",
+    "get_vecs_name_residual_quantization_complete()"
+  };
 
   SPI_connect();
 
