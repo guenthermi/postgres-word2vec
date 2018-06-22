@@ -25,11 +25,11 @@ USE_BYTEA_TYPE = True
 def get_table_information(index_config):
     if USE_BYTEA_TYPE:
         return ((index_config.get_value('coarse_table_name'),"(id serial PRIMARY KEY, vector bytea, count int)"),
-            (index_config.get_value('fine_table_name'),"(id serial PRIMARY KEY, coarse_id integer REFERENCES {!s} (id), coarse_order integer, word varchar(100), vector bytea)".format(index_config.get_value('coarse_table_name'))),
+            (index_config.get_value('fine_table_name'),"(id serial PRIMARY KEY, coarse_tag integer, word_id integer, vector bytea)"),
             (index_config.get_value('cb_table_name'), "(id serial PRIMARY KEY, pos int, code int, vector bytea, count int)"))
     else:
         return ((index_config.get_value('coarse_table_name'),"(id serial PRIMARY KEY, vector float4[], count int)"),
-            (index_config.get_value('fine_table_name'),"(id serial PRIMARY KEY, coarse_id integer REFERENCES {!s} (id), word varchar(100), vector int[])".format(index_config.get_value('coarse_table_name'))),
+            (index_config.get_value('fine_table_name'),"(id serial PRIMARY KEY, coarse_tag integer, word_id integer, vector int[])"),
             (index_config.get_value('cb_table_name'), "(id serial PRIMARY KEY, pos int, code int, vector float4[], count int)"))
 
 
@@ -53,6 +53,7 @@ def create_fine_quantizer(cq, vectors, m, centr_num, logger, iterts=10):
     return qcreator.create_quantizer(residuals, m, centr_num, logger, iterts)
 
 def create_index_with_faiss(vectors, cq, codebook, logger):
+    f = open('log_coarse.log', 'wt')
     logger.log(Logger.INFO, 'len of vectors ' + str(len(vectors)))
     result = []
     indices = []
@@ -88,6 +89,7 @@ def create_index_with_faiss(vectors, cq, codebook, logger):
             coarse_counts[I[0][0]] += 1
         else:
             coarse_counts[I[0][0]] = 1
+        f.write(str(I[0]) + "##" + str(c) + "##" + str(vec) +  '\n')
         for order, id in enumerate(I[0]):
             coarse_quantization = cq[id]
             batch_coarse_ids.append(id)
@@ -168,29 +170,15 @@ def add_to_database(words, cq, codebook, pq_quantization, coarse_counts, fine_co
     for i in range(len(pq_quantization)):
         output_vec = utils.serialize_vector(pq_quantization[i][1])
         # print('pq_quantization[i]', pq_quantization[i])
-        values.append({"coarse_id": str(pq_quantization[i][0]), "coarse_order": str(pq_quantization[i][2]), "word": words[i // len(cq)][:100], "vector": output_vec})
+        values.append({"coarse_tag": str(pq_quantization[i][0]*len(cq)+pq_quantization[i][2]), "word_id": (i // len(cq))+1, "vector": output_vec})
         # print(values[0])
         if (i % (batch_size-1) == 0) or (i == (len(pq_quantization)-1)):
             if USE_BYTEA_TYPE:
-                cur.executemany("INSERT INTO "+ index_config.get_value('fine_table_name') + " (coarse_id, coarse_order, word,vector) VALUES (%(coarse_id)s, %(coarse_order)s, %(word)s, vec_to_bytea(%(vector)s::int2[]))", tuple(values))
+                cur.executemany("INSERT INTO "+ index_config.get_value('fine_table_name') + " (coarse_tag, word_id,vector) VALUES (%(coarse_tag)s, %(word_id)s, vec_to_bytea(%(vector)s::int2[]))", tuple(values))
             else:
-                cur.executemany("INSERT INTO "+ index_config.get_value('fine_table_name') + " (coarse_id, coarse_order, word,vector) VALUES (%(coarse_id)s, %(coarse_order)s, %(word)s, %(vector)s)", tuple(values))
+                cur.executemany("INSERT INTO "+ index_config.get_value('fine_table_name') + " (coarse_tag, word_id,vector) VALUES (%(coarse_tag)s, %(word_id)s, %(vector)s)", tuple(values))
             con.commit()
             logger.log(Logger.INFO, 'Inserted ' +  str(i+1) + ' vectors')
-            values = []
-    return
-
-def add_batch_to_database(word_batch, pq_quantization, con, cur, index_config, batch_size, logger):
-    values = []
-    for i in range(len(pq_quantization)):
-        output_vec = utils.serialize_vector(pq_quantization[i][1])
-        values.append({"coarse_id": str(pq_quantization[i][0]), "word": word_batch[i][:100], "vector": output_vec})
-        if (i % (batch_size-1) == 0) or (i == (len(pq_quantization)-1)):
-            if USE_BYTEA_TYPE:
-                cur.executemany("INSERT INTO "+ index_config.get_value('fine_table_name') + " (coarse_id, word,vector) VALUES (%(coarse_id)s, %(word)s, vec_to_bytea(%(vector)s::int2[]))", tuple(values))
-            else:
-                cur.executemany("INSERT INTO "+ index_config.get_value('fine_table_name') + " (coarse_id, word,vector) VALUES (%(coarse_id)s, %(word)s, %(vector)s)", tuple(values))
-            con.commit()
             values = []
     return
 
@@ -211,7 +199,7 @@ def main(argc, argv):
     k = index_config.get_value('k')
 
     # get vectors
-    words, vectors, vectors_size = utils.get_vectors(index_config.get_value('vec_file_path'), logger)
+    words, vectors, vectors_size = utils.get_vectors(index_config.get_value('vec_file_path'), logger, max_count=2000)
     logger.log(logger.INFO, 'vectors_size :' + str(vectors_size))
 
     # determine coarse quantizer
@@ -225,6 +213,7 @@ def main(argc, argv):
         logger.log(Logger.INFO, 'Create new coarse quantizer')
         # create coarse quantizer
         cq = qcreator.create_coarse_quantizer(vectors[:train_size_coarse], centr_num_coarse)
+        print('length...', [np.linalg.norm(x) for x in cq])
         # store coarse quantizer
         qcreator.store_quantizer(cq, 'coarse_quantizer.pcl')
 
@@ -265,9 +254,8 @@ def main(argc, argv):
     # add to database
     add_to_database(words, cq, codebook, index, coarse_counts, fine_counts, con, cur, index_config, batch_size, logger)
     logger.log(logger.INFO, 'Create database index structures')
-    utils.create_index(index_config.get_value('fine_table_name'), index_config.get_value('fine_word_index_name'), 'word', con, cur, logger)
-    utils.create_index(index_config.get_value('fine_table_name'), index_config.get_value('fine_coarse_index_name'), 'coarse_id', con, cur, logger)
-    utils.create_index(index_config.get_value('fine_table_name'), index_config.get_value('fine_order_index_name'), 'coarse_order', con, cur, logger)
+    utils.create_index(index_config.get_value('fine_table_name'), index_config.get_value('fine_word_index_name'), 'word_id', con, cur, logger)
+    utils.create_index(index_config.get_value('fine_table_name'), index_config.get_value('fine_coarse_index_name'), 'coarse_tag', con, cur, logger)
     utils.enable_triggers(index_config.get_value('fine_table_name'), con, cur)
 
 if __name__ == "__main__":

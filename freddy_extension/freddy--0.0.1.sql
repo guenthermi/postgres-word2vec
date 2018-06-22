@@ -236,7 +236,7 @@ CREATE OR REPLACE FUNCTION pq_search_in(bytea, integer, integer[]) RETURNS SETOF
 AS '$libdir/freddy', 'pq_search_in'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE OR REPLACE FUNCTION ivfadc_search_in(bytea[], integer[], integer, varchar[]) RETURNS SETOF record
+CREATE OR REPLACE FUNCTION ivfadc_search_in(bytea[], integer[], integer, integer[]) RETURNS SETOF record
 AS '$libdir/freddy', 'ivfadc_search_in'
 LANGUAGE C IMMUTABLE STRICT;
 
@@ -494,7 +494,7 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION knn_in_ivfadc(token varchar(100), k integer, input_set varchar[]) RETURNS TABLE (word varchar(100), similarity float4) AS $$
+CREATE OR REPLACE FUNCTION knn_in_ivfadc(token varchar(100), k integer, input_set varchar[]) RETURNS TABLE (word varchar, similarity float4) AS $$
 DECLARE
 table_name varchar;
 fine_quantization_complete_name varchar;
@@ -508,9 +508,50 @@ FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
 END LOOP;
 
 RETURN QUERY EXECUTE format('
-SELECT word, (1.0 - (distance / 2.0))::float4 as similarity
-FROM ivfadc_search_in(ARRAY(SELECT vector FROM %s WHERE word = ''%s''), ''{0}'', ''%s''::int, ''%s''::varchar(100)[]) AS (qid integer, tid integer, distance float4) INNER JOIN %s AS f ON tid = f.id;
-', table_name, replace(token, '''', ''''''), k, formated, fine_quantization_complete_name);
+SELECT f.word, (1.0 - (distance / 2.0))::float4 as similarity
+FROM ivfadc_search_in(
+  ARRAY(SELECT vector FROM %s WHERE word = ''%s''),
+  ''{0}'',
+  ''%s''::int,
+  ARRAY(SELECT id FROM %s WHERE word = ANY(''%s''::varchar(100)[])))
+  AS (qid integer, tid integer, distance float4) INNER JOIN %s AS f ON tid = f.id;
+', table_name, replace(token, '''', ''''''), k, table_name, formated, table_name);
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION knn_in_ivfadc_batch(query_set varchar(100)[], k integer, input_set varchar[]) RETURNS TABLE (query varchar, target varchar, distance float4) AS $$
+DECLARE
+table_name varchar;
+fine_quantization_complete_name varchar;
+formated varchar[];
+formated_queries varchar[];
+ids integer[];
+vectors bytea[];
+words varchar[];
+rec RECORD;
+BEGIN
+EXECUTE 'SELECT get_vecs_name()' INTO table_name;
+EXECUTE 'SELECT get_vecs_name_residual_quantization_complete()' INTO fine_quantization_complete_name;
+
+FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
+  formated[I] = replace(input_set[I], '''', '''''');
+END LOOP;
+
+FOR I IN array_lower(query_set, 1)..array_upper(query_set, 1) LOOP
+  formated_queries[I] = replace(query_set[I], '''', '''''');
+END LOOP;
+-- create lookup id -> query_word
+FOR rec IN EXECUTE format('SELECT word, vector, id FROM %s WHERE word = ANY(''%s'')', table_name, formated_queries) LOOP
+  words := words || rec.word;
+  vectors := vectors || rec.vector;
+  ids := ids || rec.id;
+END LOOP;
+
+RETURN QUERY EXECUTE format('
+SELECT f.word, g.word, (1.0 - (distance / 2.0))::float4 as similarity
+FROM ivfadc_search_in(''%s''::bytea[], ''%s''::integer[], ''%s''::int, ARRAY(SELECT id FROM %s WHERE word = ANY(''%s''::varchar(100)[]))) AS (qid integer, tid integer, distance float4) INNER JOIN %s AS f ON qid = f.id INNER JOIN %s AS g ON tid = g.id;
+', vectors, ids, k, table_name, formated, table_name, table_name);
 END
 $$
 LANGUAGE plpgsql;

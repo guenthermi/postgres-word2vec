@@ -499,8 +499,9 @@ ivfadc_search_in(PG_FUNCTION_ARGS)
     float4** queryVectors;
     int queryVectorsSize;
     int k;
-    char** inputTerms;
-    int inputTermsSize;
+    // char** inputTerms;
+    int* inputIds;
+    int inputIdsSize;
     int* queryIds;
 
     // search parameters
@@ -523,7 +524,7 @@ ivfadc_search_in(PG_FUNCTION_ARGS)
     const int SE = 3; // size of search space is set to about SE*inputTermsSize vectors
     int n = 0;
     float4** residualVectors;
-    int inputTermsPlaneSize; // max size of all input terms together
+    // int inputTermsPlaneSize; // max size of all input terms together
     Datum* queryIdData;
 
 
@@ -536,7 +537,7 @@ ivfadc_search_in(PG_FUNCTION_ARGS)
     // for pq similarity calculation
     float4** querySimilarities;
 
-    Datum* termsData;
+    Datum* idsData;
     Datum *i_data; // for query vectors
 
     int ret;
@@ -562,7 +563,7 @@ ivfadc_search_in(PG_FUNCTION_ARGS)
     getArray(PG_GETARG_ARRAYTYPE_P(0), &i_data, &n);
     queryVectors = palloc(n*sizeof(float4*));
     queryVectorsSize = n;
-    // elog(INFO, "queryvectorssize: %d", queryVectorsSize);
+    elog(INFO, "queryvectorssize: %d", queryVectorsSize);
     for (int i = 0; i < n; i++){
       queryDim = 0;
       convert_bytea_float4(DatumGetByteaP(i_data[i]), &queryVectors[i], &queryDim);
@@ -581,16 +582,16 @@ ivfadc_search_in(PG_FUNCTION_ARGS)
 
     k = PG_GETARG_INT32(2);
 
-    getArray(PG_GETARG_ARRAYTYPE_P(3), &termsData, &n); // target words
-    inputTerms = palloc(n*sizeof(char*));
-    inputTermsPlaneSize = 0;
+    getArray(PG_GETARG_ARRAYTYPE_P(3), &idsData, &n); // target words
+    inputIds = palloc(n*sizeof(int));
+    // inputIdsPlaneSize = 0;
     for (int j=0; j< n; j++){
-      char* term = palloc(sizeof(char)*(VARSIZE(termsData[j]) - VARHDRSZ+1));
-      snprintf(term, VARSIZE(termsData[j]) + 1 - VARHDRSZ, "%s",(char*) VARDATA(termsData[j]));
-      inputTermsPlaneSize += strlen(term) + 3;
-      inputTerms[j] = term;
+      // char* term = palloc(sizeof(char)*(VARSIZE(termsData[j]) - VARHDRSZ+1));
+      // snprintf(term, VARSIZE(termsData[j]) + 1 - VARHDRSZ, "%s",(char*) VARDATA(termsData[j]));
+      // inputTermsPlaneSize += 10;
+      inputIds[j] = DatumGetInt32(idsData[j]);
     }
-    inputTermsSize = n;
+    inputIdsSize = n;
 
     // get codebook
     residualCb = getCodebook(&cbPositions, &cbCodes, tableNameResidualCodebook);
@@ -598,7 +599,8 @@ ivfadc_search_in(PG_FUNCTION_ARGS)
     cq = getCoarseQuantizer(&cqSize);
 
     subvectorSize = queryDim / cbPositions;
-    max_coarse_order = fmax(1, cqSize - (inputTermsSize * SE  / k));
+    max_coarse_order = fmax(1, cqSize - (inputIdsSize * SE  / k));
+    // elog(INFO, "inputIdsSize %d max_coarse_order %d", inputIdsSize, max_coarse_order);
 
     // init topk for output
     topKs = palloc(sizeof(TopK)*queryVectorsSize);
@@ -628,6 +630,14 @@ ivfadc_search_in(PG_FUNCTION_ARGS)
         float dist;
 
         dist = squareDistance(queryVectors[i], cq[j].vector, queryDim);
+        float4 len = 0;
+        // for (int x = 0; x < queryDim; x++){
+        //   // if ((queryVectors[i][x]-cq[j].vector[x])*(queryVectors[i][x]-cq[j].vector[x]) < 0){
+        //   //   elog(INFO, "queryVectors[i][x] %f cq[j].vector[x] %f (queryVectors[i][x]-cq[j].vector[x])*(queryVectors[i][x]-cq[j].vector[x]) %f", queryVectors[i][x], cq[j].vector[x], (queryVectors[i][x]-cq[j].vector[x])*(queryVectors[i][x]-cq[j].vector[x]));
+        //   // }
+        //   len += ((float4)(queryVectors[i][x]-cq[j].vector[x]))*((float4)(queryVectors[i][x]-cq[j].vector[x]));
+        // }
+        // elog(INFO, "j %d dist %f len %f queryDim %d", j, dist, len, queryDim);
         if (dist < minDist){
           cqId = j;
           cqIds[i] = cqId;
@@ -639,7 +649,9 @@ ivfadc_search_in(PG_FUNCTION_ARGS)
       }
       cqTableIds[cqId][cqTableIdCounts[cqId]] = i;
       cqTableIdCounts[cqId] += 1;
+      // elog(INFO, "minDist %f cqId %d", minDist, cqId);
     }
+    //elog(INFO, "cqTableIds[22][0] %d", cqTableIds[22][0]);
 
     querySimilarities = palloc(sizeof(float4*)*queryVectorsSize);
     // compute residuals = {queryVector - coarse_quantization(queryVector)}
@@ -669,35 +681,44 @@ ivfadc_search_in(PG_FUNCTION_ARGS)
     SPI_connect();
     proc = 0;
     while (proc < (k*(SE/2))){
-      command = palloc(inputTermsPlaneSize* sizeof(char) + queryVectorsSize*10*sizeof(char)+3000); //TODO revise
-      cur = command;
-      cur += sprintf(cur, "SELECT id, coarse_id, vector FROM %s WHERE (coarse_order < %d) AND (coarse_id IN (", tableNameFineQuantizationComplete, max_coarse_order);
-      // fill command
-      // cur = command;// + strlen(command);
+      // compute coarse tags
+      int coarse_id_tags_size = queryVectorsSize*(max_coarse_order);
+      int* coarse_id_tags = palloc(coarse_id_tags_size*sizeof(int));
       for (int i = 0; i < queryVectorsSize; i++){
-        if ( i == queryVectorsSize - 1){
-            cur += sprintf(cur, "%d", cqIds[i]);
-        }else{
-          cur += sprintf(cur, "%d,", cqIds[i]);
+        for (int j = 0; j < max_coarse_order; j++){
+            coarse_id_tags[i*max_coarse_order+j] = cqSize*cqIds[i] + j;
         }
       }
-      cur += sprintf(cur, ")) AND (word IN (");
-      for (int i = 0; i < inputTermsSize; i++){
-        if ( i == inputTermsSize - 1){
-            cur += sprintf(cur, "'%s'", inputTerms[i]);
+      elog(INFO, "coarse_id_tags[i] %d %d %d size %d", coarse_id_tags[0], coarse_id_tags[1], coarse_id_tags[2], coarse_id_tags_size);
+      command = palloc(inputIdsSize*10*sizeof(char) + queryVectorsSize*10*sizeof(char)+3000); //TODO revise
+      cur = command;
+      cur += sprintf(cur, "SELECT word_id, coarse_tag, vector FROM %s WHERE (coarse_tag IN (", tableNameFineQuantizationComplete);
+      // fill command
+      // cur = command;// + strlen(command);
+      for (int i = 0; i < coarse_id_tags_size; i++){
+        if ( i == coarse_id_tags_size - 1){
+            cur += sprintf(cur, "%d", coarse_id_tags[i]);
         }else{
-          cur += sprintf(cur, "'%s',", inputTerms[i]);
+          cur += sprintf(cur, "%d,", coarse_id_tags[i]);
+        }
+      }
+      cur += sprintf(cur, ")) AND (word_id IN (");
+      for (int i = 0; i < inputIdsSize; i++){
+        if ( i == inputIdsSize - 1){
+            cur += sprintf(cur, "%d", inputIds[i]);
+        }else{
+          cur += sprintf(cur, "%d,", inputIds[i]);
         }
       }
 
 
       sprintf(cur, "))");
-      elog(INFO, "exec query now %s", command);
+      elog(INFO, "exec query now");
       ret = SPI_exec(command, 0);
       elog(INFO, "got results");
       proc = SPI_processed;
       if (proc < (k*(SE/2))){
-        max_coarse_order += fmax(1, cqSize - (inputTermsSize * SE  / k));
+        max_coarse_order += fmax(1, cqSize - (inputIdsSize * SE  / k));
       }
     }
 
@@ -709,6 +730,7 @@ ivfadc_search_in(PG_FUNCTION_ARGS)
       for (i = 0; i < proc; i++){
         // Datum vectorData;
         int coarseId;
+        int coarseTag;
         int16* codes;
         int wordId;
         // char* word;
@@ -717,11 +739,12 @@ ivfadc_search_in(PG_FUNCTION_ARGS)
         HeapTuple tuple = tuptable->vals[i];
         // word = SPI_getvalue(tuple, tupdesc, 1);
         wordId = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &info));
-        coarseId = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 2, &info));
+        coarseTag = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 2, &info));
         n = 0;
         convert_bytea_int16(DatumGetByteaP(SPI_getbinval(tuple, tupdesc, 3, &info)), &codes, &n);
         n = 0;
-
+        coarseId = (int) (coarseTag / cqSize);
+        // elog(INFO, "cqTableIds[22][0] %d", cqTableIds[22][0]);
         for (int j = 0; j < cqTableIdCounts[coarseId];j++){
           int queryVectorsIndex = cqTableIds[coarseId][j];
           distance = 0;
