@@ -17,6 +17,7 @@ from ivfadc_index_creator import *
 import index_utils as utils
 import index_manager as im
 import quantizer_creation as qcreator
+import database_export as db_export
 
 
 USE_PIPELINE_APPROACH = True
@@ -32,27 +33,7 @@ def get_table_information(index_config):
             (index_config.get_value('fine_table_name'),"(id serial PRIMARY KEY, coarse_id integer REFERENCES {!s} (id), word varchar(100), vector int[])".format(index_config.get_value('coarse_table_name'))),
             (index_config.get_value('cb_table_name'), "(id serial PRIMARY KEY, pos int, code int, vector float4[], count int)"))
 
-
-def create_fine_quantizer(cq, vectors, m, centr_num, logger, iterts=10):
-    if len(vectors[0]) % m != 0:
-        logger.log(Logger.ERROR, 'd mod m != 0')
-        return
-
-    # create faiss index for coarse quantizer
-    index = faiss.IndexFlatL2(len(vectors[0]))
-    index.add(cq)
-
-    # calculate residual for every vector
-    residuals = []
-    for vec in vectors:
-        _, I = index.search(np.array([vec]),1)
-        coarse_quantization = cq[I[0][0]]
-        residuals.append(vec - coarse_quantization)
-
-    # calculate and return residual codebook
-    return qcreator.create_quantizer(residuals, m, centr_num, logger, iterts)
-
-def create_index_with_faiss(vectors, cq, codebook, logger):
+def create_index_data(vectors, cq, codebook, logger):
     logger.log(Logger.INFO, 'len of vectors ' + str(len(vectors)))
     result = []
     indices = []
@@ -114,40 +95,12 @@ def create_index_with_faiss(vectors, cq, codebook, logger):
     logger.log(Logger.INFO, 'Appended ' + str(len(result)) + ' vectors')
     return result, coarse_counts, fine_counts
 
-def add_codebook_to_database(codebook, fine_counts, con, cur, index_config):
-    for pos in range(len(codebook)):
-        values = []
-        for i in range(len(codebook[pos])):
-            output_vec = utils.serialize_vector(codebook[pos][i])
-            count = fine_counts[(pos, i)] if (pos, i) in fine_counts else 0
-            values.append({"pos": pos, "code": i, "vector": output_vec, "count": count})
-        if USE_BYTEA_TYPE:
-            cur.executemany("INSERT INTO "+ index_config.get_value('cb_table_name') + " (pos,code,vector,count) VALUES (%(pos)s, %(code)s, vec_to_bytea(%(vector)s::float4[]), %(count)s)", tuple(values))
-        else:
-            cur.executemany("INSERT INTO "+ index_config.get_value('cb_table_name') + " (pos,code,vector,count) VALUES (%(pos)s, %(code)s, %(vector)s, %(count)s)", tuple(values))
-        con.commit()
-    return
-
-def add_cq_to_database(cq, coarse_counts, con, cur, index_config):
-    # add coarse quantization
-    values = []
-    for i in range(len(cq)):#
-        output_vec = utils.serialize_vector(cq[i])
-        count = coarse_counts[i] if i in coarse_counts else 0
-        values.append({"id": i, "vector": output_vec, "count": count})
-    if USE_BYTEA_TYPE:
-        cur.executemany("INSERT INTO " + index_config.get_value('coarse_table_name') + " (id, vector, count) VALUES (%(id)s, vec_to_bytea(%(vector)s::float4[]), %(count)s)", tuple(values))
-    else:
-        cur.executemany("INSERT INTO " + index_config.get_value('coarse_table_name') + " (id, vector, count) VALUES (%(id)s, %(vector)s, %(count)s)", tuple(values))
-    con.commit()
-    return
-
 def add_to_database(words, cq, codebook, pq_quantization, coarse_counts, fine_counts, con, cur, index_config, batch_size, logger):
     # add codebook
-    add_codebook_to_database(codebook, fine_counts, con, cur, index_config)
+    db_export.add_codebook_to_database(codebook, fine_counts, con, cur, index_config)
 
     # add coarse quantization
-    add_cq_to_database(cq, coarse_counts, con, cur, index_config)
+    db_export.add_cq_to_database(cq, coarse_counts, con, cur, index_config)
 
     # add fine qunatization
     values = []
@@ -200,42 +153,27 @@ def main(argc, argv):
 
     # determine coarse quantizer
     cq = None
-    if index_config.has_key('coarse_quantizer_file'):
-        cq_filename = index_config.get_value('coarse_quantizer_file')
-        if cq_filename:
-            logger.log(Logger.INFO, 'Use coarse quantizer from ' + cq_filename)
-            cq = qcreator.load_quantizer(cq_filename)
-    if type(cq) == type(None):
-        logger.log(Logger.INFO, 'Create new coarse quantizer')
-        # create coarse quantizer
-        cq = qcreator.create_coarse_quantizer(vectors[:train_size_coarse], centr_num_coarse)
-        # store coarse quantizer
-        qcreator.store_quantizer(cq, 'coarse_quantizer.pcl')
+    cq_filename = index_config.get_value('coarse_quantizer_file') if \
+        index_config.has_key('coarse_quantizer_file') else None
+    cq_output_name = cq_filename if cq_filename != None else 'coarse_quantizer.pcl'
+    cq = qcreator.construct_quantizer(qcreator.create_coarse_quantizer,
+        (vectors[:train_size_coarse], centr_num_coarse), logger,
+        input_name=cq_filename, output_name=cq_output_name)
 
-    # determine codebook
+    # determine resiual codebook
     codebook = None
-    if index_config.has_key('residual_codebook_file'):
-        codebook_filename = index_config.get_value('residual_codebook_file')
-        if codebook_filename:
-            logger.log(Logger.INFO, 'Use residual codebook from ' + codebook_filename)
-            codebook = qcreator.load_quantizer(codebook_filename)
-    if type(codebook) == type(None):
-        logger.log(Logger.INFO, 'Create new residual codebook')
-        # calculate codebook based on residuals
-        codebook = create_fine_quantizer(cq, vectors[:train_size_fine], m, k, logger)
-        # store codebook
-        qcreator.store_quantizer(codebook, 'residual_codebook.pcl')
+    codebook_filename = index_config.get_value('residual_codebook_file') if \
+        index_config.has_key('residual_codebook_file') else None
+    codebook_output_name = codebook_filename if codebook_filename != None else 'residual_codebook.pcl'
+    codebook = qcreator.construct_quantizer(qcreator.create_residual_quantizer,
+        (cq, vectors[:train_size_fine], m, k, logger), logger,
+        input_name=codebook_filename, output_name=codebook_output_name)
 
     con = None
     cur = None
     if (index_config.get_value('add_to_database')):
         # create db connection
-        try:
-            con = psycopg2.connect("dbname='" + db_config.get_value('db_name') + "' user='" + db_config.get_value('username') + "' host='" + db_config.get_value('host') + "' password='" + db_config.get_value('password') + "'")
-        except:
-            logger.log(logger.ERROR, 'Can not connect to database')
-            return
-        cur = con.cursor()
+        con, cur = db_export.create_connection(db_config, logger)
 
         utils.init_tables(con, cur, get_table_information(index_config), logger)
         utils.disable_triggers(index_config.get_value('fine_table_name'),con, cur)
@@ -249,7 +187,7 @@ def main(argc, argv):
     if not use_pipeline:
         logger.log(logger.INFO, 'Start index creation (single cycle)')
         start = time.time()
-        index, coarse_counts, fine_counts = create_index_with_faiss(vectors[:vectors_size], cq, codebook, logger)
+        index, coarse_counts, fine_counts = create_index_data(vectors[:vectors_size], cq, codebook, logger)
         end = time.time()
         logger.log(logger.INFO, 'Finish index creation after ' + str(end - start) + ' seconds')
         # add to file

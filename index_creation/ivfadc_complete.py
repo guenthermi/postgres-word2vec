@@ -161,9 +161,7 @@ def main(argc, argv):
         (vectors[:train_size_coarse], centr_num_coarse), logger,
         input_name=cq_filename, output_name=cq_output_name)
 
-    print(cq[0])
-
-    # determine codebook
+    # determine resiual codebook
     codebook = None
     codebook_filename = index_config.get_value('residual_codebook_file') if \
         index_config.has_key('residual_codebook_file') else None
