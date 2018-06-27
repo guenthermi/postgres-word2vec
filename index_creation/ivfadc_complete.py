@@ -149,7 +149,7 @@ def main(argc, argv):
     k = index_config.get_value('k')
 
     # get vectors
-    words, vectors, vectors_size = utils.get_vectors(index_config.get_value('vec_file_path'), logger, max_count=2000)
+    words, vectors, vectors_size = utils.get_vectors(index_config.get_value('vec_file_path'), logger)
     logger.log(logger.INFO, 'vectors_size :' + str(vectors_size))
 
     # determine coarse quantizer

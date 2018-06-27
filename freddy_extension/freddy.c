@@ -52,6 +52,36 @@ typedef struct UsrFctxGrouping {
   char **values;
 } UsrFctxGrouping;
 
+inline void getPrecomputedDistances(float4* preDists, int cbPositions, int cbCodes, int subvectorSize, float4* queryVector, Codebook cb){
+  for (int i=0; i< cbPositions*cbCodes; i++){
+      int pos = cb[i].pos;
+      int code = cb[i].code;
+      float* vector = cb[i].vector;
+      preDists[pos*cbCodes + code] = squareDistance(queryVector+(pos*subvectorSize), vector, subvectorSize);
+  }
+}
+
+void fillUsrFctx(UsrFctx* usrfctx, TopK topK, int k){
+  usrfctx -> tk = topK;
+  usrfctx -> k = k;
+  usrfctx -> iter = 0;
+  usrfctx -> values = (char **) palloc (2 * sizeof (char *));
+  usrfctx -> values  [0] = (char*) palloc   (16 * sizeof (char));
+  usrfctx -> values  [1] = (char*) palloc  (16 * sizeof (char));
+}
+
+void fillUsrFctxBatch(UsrFctxBatch* usrfctx, int* queryIds, int queryVectorsSize, TopK* topKs, int k){
+  usrfctx -> tk = topKs;
+  usrfctx -> k = k;
+  usrfctx -> queryIds = queryIds;
+  usrfctx -> queryIdsSize = queryVectorsSize;
+  usrfctx -> iter = 0;
+  usrfctx -> values = (char **) palloc (3 * sizeof (char *));
+  usrfctx -> values  [0] = (char*) palloc   (16 * sizeof (char));
+  usrfctx -> values  [1] = (char*) palloc   (16 * sizeof (char));
+  usrfctx -> values  [2] = (char*) palloc  (16 * sizeof (char));
+}
+
 PG_FUNCTION_INFO_V1(pq_search);
 
 Datum
@@ -117,12 +147,7 @@ pq_search(PG_FUNCTION_ARGS)
 
     // determine similarities of codebook entries to query vector
     querySimilarities = palloc(cbPositions*cbCodes*sizeof(float));
-    for (int i=0; i< cbPositions*cbCodes; i++){
-        int pos = cb[i].pos;
-        int code = cb[i].code;
-        float* vector = cb[i].vector;
-        querySimilarities[pos*cbCodes + code] = squareDistance(queryVector+(pos*subvectorSize), vector, subvectorSize);
-    }
+    getPrecomputedDistances(querySimilarities, cbPositions, cbCodes, subvectorSize, queryVector, cb);
 
     end = clock();
     elog(INFO,"calculate similarities time %f", (double) (end - start) / CLOCKS_PER_SEC);
@@ -179,12 +204,7 @@ pq_search(PG_FUNCTION_ARGS)
     elog(INFO,"calculate distances time %f", (double) (end - start) / CLOCKS_PER_SEC);
 
     usrfctx = (UsrFctx*) palloc (sizeof (UsrFctx));
-    usrfctx -> tk = topK;
-    usrfctx -> k = k;
-    usrfctx -> iter = 0;
-    usrfctx -> values = (char **) palloc (2 * sizeof (char *));
-    usrfctx -> values  [0] = (char*) palloc   (16 * sizeof (char));
-    usrfctx -> values  [1] = (char*) palloc  (16 * sizeof (char));
+    fillUsrFctx(usrfctx, topK, k);
     funcctx -> user_fctx = (void *)usrfctx;
     outtertupdesc = CreateTemplateTupleDesc (2 , false);
     TupleDescInitEntry (outtertupdesc,  1, "Id",    INT4OID, -1, 0);
@@ -369,12 +389,7 @@ ivfadc_search(PG_FUNCTION_ARGS)
      for (int j = 0; j < param_w; j++){
        int simId = cqSelection[j].id;
        querySimilarities[simId] = palloc(cbPositions*cbCodes*sizeof(float));
-       for (int i=0; i< cbPositions*cbCodes; i++){
-           int pos = residualCb[i].pos;
-           int code = residualCb[i].code;
-           float* vector = residualCb[i].vector;
-           querySimilarities[simId][pos*cbCodes + code] = squareDistance(residualVectors[j]+(pos*subvectorSize), vector, subvectorSize);
-       }
+       getPrecomputedDistances(querySimilarities[simId], cbPositions, cbCodes, subvectorSize, residualVectors[j], residualCb);
      }
 
      end = clock();
@@ -438,12 +453,7 @@ ivfadc_search(PG_FUNCTION_ARGS)
     }
 
     usrfctx = (UsrFctx*) palloc (sizeof (UsrFctx));
-    usrfctx -> tk = topK;
-    usrfctx -> k = k;
-    usrfctx -> iter = 0;
-    usrfctx -> values = (char **) palloc (2 * sizeof (char *));
-    usrfctx -> values  [0] = (char*) palloc   (16 * sizeof (char));
-    usrfctx -> values  [1] = (char*) palloc  (16 * sizeof (char));
+    fillUsrFctx(usrfctx, topK, k);
     funcctx -> user_fctx = (void *)usrfctx;
     outtertupdesc = CreateTemplateTupleDesc (2 , false);
     TupleDescInitEntry (outtertupdesc,  1, "Id",    INT4OID, -1, 0);
@@ -668,12 +678,7 @@ ivfadc_search_in(PG_FUNCTION_ARGS)
       // determine similarities of codebook entries to residual vector
 
       querySimilarities[i] = palloc(cbPositions*cbCodes*sizeof(float4));
-      for (int j=0; j< cbPositions*cbCodes; j++){
-          int pos = residualCb[j].pos;
-          int code = residualCb[j].code;
-          float4* vector = residualCb[j].vector;
-          querySimilarities[i][pos*cbCodes + code] = squareDistance(residualVectors[i]+(pos*subvectorSize), vector, subvectorSize);
-      }
+      getPrecomputedDistances(querySimilarities[i], cbPositions, cbCodes, subvectorSize, residualVectors[i], residualCb);
     }
     //
     // char* command = SELECT coarse_id, count(coarse_id) FROM fine_quantization WHERE word IN ('go', 'test', 'drive') GROUP BY coarse_id;
@@ -783,15 +788,7 @@ ivfadc_search_in(PG_FUNCTION_ARGS)
 
     // return tokKs
     usrfctx = (UsrFctxBatch*) palloc (sizeof (UsrFctxBatch));
-    usrfctx -> tk = topKs;
-    usrfctx -> k = k;
-    usrfctx -> queryIds = queryIds;
-    usrfctx -> queryIdsSize = queryVectorsSize;
-    usrfctx -> iter = 0;
-    usrfctx -> values = (char **) palloc (3 * sizeof (char *));
-    usrfctx -> values  [0] = (char*) palloc   (16 * sizeof (char));
-    usrfctx -> values  [1] = (char*) palloc   (16 * sizeof (char));
-    usrfctx -> values  [2] = (char*) palloc  (16 * sizeof (char));
+    fillUsrFctxBatch(usrfctx, queryIds, queryVectorsSize, topKs, k);
     funcctx -> user_fctx = (void *)usrfctx;
     outtertupdesc = CreateTemplateTupleDesc (3 , false);
 
@@ -1001,12 +998,7 @@ ivpq_search_in(PG_FUNCTION_ARGS)
       querySimilarities = palloc(sizeof(float4*)*queryVectorsSize);
       for (int i = 0; i < queryVectorsSize; i++){
         querySimilarities[i] = palloc(cbPositions*cbCodes*sizeof(float4));
-        for (int j=0; j< cbPositions*cbCodes; j++){
-            int pos = cb[j].pos;
-            int code = cb[j].code;
-            float4* vector = cb[j].vector;
-            querySimilarities[i][pos*cbCodes + code] = squareDistance(queryVectors[i]+(pos*subvectorSize), vector, subvectorSize);
-        }
+        getPrecomputedDistances(querySimilarities[i], cbPositions, cbCodes, subvectorSize, queryVectors[i], cb);
       }
 
       SPI_connect();
@@ -1127,15 +1119,7 @@ ivpq_search_in(PG_FUNCTION_ARGS)
 
       // return tokKs
       usrfctx = (UsrFctxBatch*) palloc (sizeof (UsrFctxBatch));
-      usrfctx -> tk = topKs;
-      usrfctx -> k = k;
-      usrfctx -> queryIds = queryIds;
-      usrfctx -> queryIdsSize = queryVectorsSize;
-      usrfctx -> iter = 0;
-      usrfctx -> values = (char **) palloc (3 * sizeof (char *));
-      usrfctx -> values  [0] = (char*) palloc   (16 * sizeof (char));
-      usrfctx -> values  [1] = (char*) palloc   (16 * sizeof (char));
-      usrfctx -> values  [2] = (char*) palloc  (16 * sizeof (char));
+      fillUsrFctxBatch(usrfctx, queryIds, queryVectorsSize, topKs, k);
       funcctx -> user_fctx = (void *)usrfctx;
       outtertupdesc = CreateTemplateTupleDesc (3 , false);
 
@@ -1380,12 +1364,7 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
        // compute subvector similarities lookup
        // determine similarities of codebook entries to residual vector
        querySimilarities[i] = palloc(cbPositions*cbCodes*sizeof(float4));
-       for (int j=0; j< cbPositions*cbCodes; j++){
-           int pos = residualCb[j].pos;
-           int code = residualCb[j].code;
-           float4* vector = residualCb[j].vector;
-           querySimilarities[i][pos*cbCodes + code] = squareDistance(residualVector+(pos*subvectorSize), vector, subvectorSize);
-       }
+       getPrecomputedDistances(querySimilarities[i], cbPositions, cbCodes, subvectorSize, residualVector, residualCb);
      }
 
      end = clock();
@@ -1477,15 +1456,7 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS){
 
     // return tokKs
     usrfctx = (UsrFctxBatch*) palloc (sizeof (UsrFctxBatch));
-    usrfctx -> tk = topKs;
-    usrfctx -> k = k;
-    usrfctx -> queryIds = idArray;
-    usrfctx -> queryIdsSize = queryVectorsSize;
-    usrfctx -> iter = 0;
-    usrfctx -> values = (char **) palloc (3 * sizeof (char *));
-    usrfctx -> values  [0] = (char*) palloc   (16 * sizeof (char));
-    usrfctx -> values  [1] = (char*) palloc   (16 * sizeof (char));
-    usrfctx -> values  [2] = (char*) palloc  (16 * sizeof (char));
+    fillUsrFctxBatch(usrfctx, idArray, queryVectorsSize, topKs, k);
     funcctx -> user_fctx = (void *)usrfctx;
     outtertupdesc = CreateTemplateTupleDesc (3 , false);
 
@@ -1600,12 +1571,7 @@ pq_search_in(PG_FUNCTION_ARGS)
 
     // determine similarities of codebook entries to query vector
     querySimilarities = palloc(cbPositions*cbCodes*sizeof(float));
-    for (int i=0; i< cbPositions*cbCodes; i++){
-      int pos = cb[i].pos;
-      int code = cb[i].code;
-      float* vector = cb[i].vector;
-      querySimilarities[pos*cbCodes + code] = squareDistance(queryVector+(pos*subvectorSize), vector, subvectorSize);
-    }
+    getPrecomputedDistances(querySimilarities, cbPositions, cbCodes, subvectorSize, queryVector, cb);
 
     // calculate TopK by summing up squared distanced sum method
     topK = palloc(k*sizeof(TopKEntry));
@@ -1661,12 +1627,7 @@ pq_search_in(PG_FUNCTION_ARGS)
       SPI_finish();
 
       usrfctx = (UsrFctx*) palloc (sizeof (UsrFctx));
-      usrfctx -> tk = topK;
-      usrfctx -> k = k;
-      usrfctx -> iter = 0;
-      usrfctx -> values = (char **) palloc (2 * sizeof (char *));
-      usrfctx -> values  [0] = (char*) palloc   (16 * sizeof (char));
-      usrfctx -> values  [1] = (char*) palloc  (16 * sizeof (char));
+      fillUsrFctx(usrfctx, topK, k);
       funcctx -> user_fctx = (void *)usrfctx;
       outtertupdesc = CreateTemplateTupleDesc (2 , false);
       TupleDescInitEntry (outtertupdesc,  1, "Id",    INT4OID, -1, 0);
@@ -1822,12 +1783,7 @@ cluster_pq(PG_FUNCTION_ARGS)
 
       for (int cs = 0; cs < k; cs++){
         querySimilarities[cs] = palloc(cbPositions*cbCodes*sizeof(float));
-        for (int i=0; i< cbPositions*cbCodes; i++){
-          int pos = cb[i].pos;
-          int code = cb[i].code;
-          float* vector = cb[i].vector;
-          querySimilarities[cs][pos*cbCodes + code] = squareDistance(kmCentroids[cs]+(pos*subvectorSize), vector, subvectorSize);
-        }
+        getPrecomputedDistances(querySimilarities[cs], cbPositions, cbCodes, subvectorSize, kmCentroids[cs], cb);
       }
 
 
@@ -2111,12 +2067,7 @@ grouping_pq(PG_FUNCTION_ARGS)
 
     for (int cs = 0; cs < groupVecsSize; cs++){
       querySimilarities[cs] = palloc(cbPositions*cbCodes*sizeof(float));
-      for (int i=0; i< cbPositions*cbCodes; i++){
-        int pos = cb[i].pos;
-        int code = cb[i].code;
-        float* vector = cb[i].vector;
-        querySimilarities[cs][pos*cbCodes + code] = squareDistance(groupVecs[cs]+(pos*subVectorSize), vector, subVectorSize);
-      }
+      getPrecomputedDistances(querySimilarities[cs], cbPositions, cbCodes, subVectorSize, groupVecs[cs], cb);
     }
     // get vectors for group_ids
     // get codes for all entries with an id in inputIds -> SQL Query

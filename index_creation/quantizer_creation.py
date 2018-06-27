@@ -55,11 +55,11 @@ def construct_quantizer(create_func, params, logger, input_name=None, output_nam
     quantizer = None
     if input_name:
         if os.path.isfile(input_name):
-            logger.log(Logger.INFO, 'Use coarse quantizer from ' + input_name)
+            logger.log(Logger.INFO, 'Use quantizer from ' + input_name)
             quantizer = load_quantizer(input_name)
     print('type', type(quantizer))
     if type(quantizer) == type(None):
-        logger.log(Logger.INFO, 'Create new coarse quantizer')
+        logger.log(Logger.INFO, 'Create new quantizer for ' + output_name)
         # create coarse quantizer
         quantizer = create_func(*params)
         print('get here')
