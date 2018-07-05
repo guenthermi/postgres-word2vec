@@ -14,7 +14,14 @@ typedef struct TopKWordEntry{
   float distance;
 }TopKWordEntry;
 
+typedef struct TopKPVEntry{
+  int id;
+  float distance;
+  float4* vector;
+}TopKPVEntry;
+
 typedef TopKEntry* TopK;
+typedef TopKPVEntry* TopKPV;
 
 typedef struct CoarseQuantizerEntry{
     int id;
@@ -50,6 +57,8 @@ typedef enum {ORIGINAL, NORMALIZED, PQ_QUANTIZATION, CODEBOOK, RESIDUAL_QUANTIZA
 
 typedef enum {PARAM_PVF, PARAM_W} parameterType;
 
+typedef enum {PQ_CALC = 0, EXACT_CALC = 1, PQ_PV_CALC = 2} calculationMethod;
+
 typedef CodebookEntry* Codebook;
 
 typedef CodebookEntryComplete* CodebookWithCounts;
@@ -57,6 +66,8 @@ typedef CodebookEntryComplete* CodebookWithCounts;
 typedef CoarseQuantizerEntry* CoarseQuantizer;
 
 void updateTopK(TopK tk, float distance, int id, int k, int maxDist);
+
+void updateTopKPV(TopKPV tk, float distance, int id, int k, int maxDist, float4* vector, int dim);
 
 void updateTopKWordEntry(char** term, char* word);
 

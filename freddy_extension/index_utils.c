@@ -25,6 +25,25 @@ void updateTopK(TopK tk, float distance, int id, int k, int maxDist){
   tk[i].id = id;
 }
 
+void updateTopKPV(TopKPV tk, float distance, int id, int k, int maxDist, float4* vector, int dim){
+  int i;
+  for (i = k-1; i >= 0; i--){
+    if (tk[i].distance < distance){
+      break;
+    }
+  }
+  i++;
+  for (int j = k-2; j >= i; j--){
+    tk[j+1].distance = tk[j].distance;
+    tk[j+1].id = tk[j].id;
+    memcpy(tk[j+1].vector, tk[j].vector, dim*sizeof(float4));
+    //tk[j+1].vector = tk[j].vector;
+  }
+  tk[i].distance = distance;
+  tk[i].id = id;
+  memcpy(tk[i].vector, vector, dim*sizeof(float4));
+}
+
 void updateTopKWordEntry(char** term, char* word){
   char* cur = word;
   memset(word,0,strlen(word));

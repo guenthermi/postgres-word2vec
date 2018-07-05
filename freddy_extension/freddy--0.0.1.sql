@@ -31,6 +31,13 @@ END
 $$
 LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION set_se(se integer) RETURNS void AS $$
+BEGIN
+EXECUTE format('CREATE OR REPLACE FUNCTION get_se() RETURNS integer AS ''SELECT %s'' LANGUAGE sql IMMUTABLE', se);
+END
+$$
+LANGUAGE plpgsql;
+
 CREATE OR REPLACE FUNCTION set_knn_function(name varchar) RETURNS void AS $$
 BEGIN
 EXECUTE format('CREATE OR REPLACE FUNCTION get_knn_function_name() RETURNS varchar AS ''SELECT varchar ''''%s'''''' LANGUAGE sql IMMUTABLE', name);
@@ -87,6 +94,7 @@ END$$;
 
 SELECT set_pvf(20);
 SELECT set_w(3);
+SELECT set_se(3);
 SELECT set_knn_function('k_nearest_neighbour');
 SELECT set_knn_in_function('knn_in_exact');
 SELECT set_knn_batch_function('k_nearest_neighbour_ivfadc_batch');
@@ -243,7 +251,7 @@ AS '$libdir/freddy', 'ivfadc_search_in'
 LANGUAGE C IMMUTABLE STRICT;
 
 -- TODO implement
-CREATE OR REPLACE FUNCTION ivpq_search_in(bytea[], integer[], integer, integer[]) RETURNS SETOF record
+CREATE OR REPLACE FUNCTION ivpq_search_in(bytea[], integer[], integer, integer[], integer, integer, integer) RETURNS SETOF record
 AS '$libdir/freddy', 'ivpq_search_in'
 LANGUAGE C IMMUTABLE STRICT;
 
@@ -526,10 +534,12 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION knn_in_iv_batch(query_set varchar(100)[], k integer, input_set varchar[], function_name varchar) RETURNS TABLE (query varchar, target varchar, distance float4) AS $$
+CREATE OR REPLACE FUNCTION knn_in_iv_batch(query_set varchar(100)[], k integer, input_set varchar[], function_name varchar) RETURNS TABLE (query varchar, target varchar, similarity float4) AS $$
 DECLARE
 table_name varchar;
 fine_quantization_complete_name varchar;
+post_verif integer;
+se integer;
 formated varchar[];
 formated_queries varchar[];
 ids integer[];
@@ -539,7 +549,9 @@ rec RECORD;
 BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 EXECUTE 'SELECT get_vecs_name_residual_quantization_complete()' INTO fine_quantization_complete_name;
-
+EXECUTE 'SELECT get_pvf()' INTO post_verif;
+EXECUTE 'SELECT get_se()' INTO se;
+RAISE NOTICE 'get there';
 FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
   formated[I] = replace(input_set[I], '''', '''''');
 END LOOP;
@@ -553,17 +565,17 @@ FOR rec IN EXECUTE format('SELECT word, vector, id FROM %s WHERE word = ANY(''%s
   vectors := vectors || rec.vector;
   ids := ids || rec.id;
 END LOOP;
-
+RAISE NOTICE 'get execute query';
 RETURN QUERY EXECUTE format('
 SELECT f.word, g.word, (1.0 - (distance / 2.0))::float4 as similarity
-FROM %s(''%s''::bytea[], ''%s''::integer[], ''%s''::int, ARRAY(SELECT id FROM %s WHERE word = ANY(''%s''::varchar(100)[]))) AS (qid integer, tid integer, distance float4) INNER JOIN %s AS f ON qid = f.id INNER JOIN %s AS g ON tid = g.id;
-', function_name, vectors, ids, k, table_name, formated, table_name, table_name);
+FROM %s(''%s''::bytea[], ''%s''::integer[], ''%s''::int, ARRAY(SELECT id FROM %s WHERE word = ANY(''%s''::varchar(100)[])), %s, %s, 2) AS (qid integer, tid integer, distance float4) INNER JOIN %s AS f ON qid = f.id INNER JOIN %s AS g ON tid = g.id;
+', function_name, vectors, ids, k, table_name, formated, se, post_verif, table_name, table_name);
 END
 $$
 LANGUAGE plpgsql;
 
 
-CREATE OR REPLACE FUNCTION knn_in_ivfadc_batch(query_set varchar(100)[], k integer, input_set varchar[]) RETURNS TABLE (query varchar, target varchar, distance float4) AS $$
+CREATE OR REPLACE FUNCTION knn_in_ivfadc_batch(query_set varchar(100)[], k integer, input_set varchar[]) RETURNS TABLE (query varchar, target varchar, similarity float4) AS $$
 DECLARE
 formated varchar[];
 formated_queries varchar[];
@@ -583,12 +595,12 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION knn_in_ivpq_batch(query_set varchar(100)[], k integer, input_set varchar[]) RETURNS TABLE (query varchar, target varchar, distance float4) AS $$
+CREATE OR REPLACE FUNCTION knn_in_ivpq_batch(query_set varchar(100)[], k integer, input_set varchar[]) RETURNS TABLE (query varchar, target varchar, similarity float4) AS $$
 DECLARE
 formated varchar[];
 formated_queries varchar[];
 BEGIN
-
+RAISE NOTICE 'get here';
 FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
   formated[I] = replace(input_set[I], '''', '''''');
 END LOOP;
