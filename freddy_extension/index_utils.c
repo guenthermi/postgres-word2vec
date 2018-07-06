@@ -56,6 +56,40 @@ void updateTopKWordEntry(char** term, char* word){
   }
 }
 
+void initTopK(TopK* pTopK, int k, const float maxDist){
+  *pTopK = palloc(k*sizeof(TopKEntry));
+  for (int i = 0; i < k; i++){
+    (*pTopK)[i].distance = maxDist;
+    (*pTopK)[i].id = -1;
+  }
+}
+
+void initTopKs(TopK** pTopKs, float** pMaxDists, int queryVectorsSize, int k, const float maxDist){
+  *pTopKs = palloc(queryVectorsSize*sizeof(TopK));
+  *pMaxDists = palloc(sizeof(float)*queryVectorsSize);
+  for (int i = 0; i < queryVectorsSize; i++){
+    initTopK(&((*pTopKs)[i]), k, maxDist);
+    (*pMaxDists)[i] = maxDist;
+  }
+}
+
+void initTopKPV(TopKPV* pTopK, int k, const float maxDist, int dim){
+  *pTopK = palloc(k*sizeof(TopKPVEntry));
+  for (int i = 0; i < k; i++){
+    (*pTopK)[i].distance = maxDist;
+    (*pTopK)[i].id = -1;
+    (*pTopK)[i].vector = palloc(sizeof(float4)*dim);
+  }
+}
+
+void initTopKPVs(TopKPV** pTopKs, float** pMaxDists, int queryVectorsSize, int k, const float maxDist, int dim){
+  *pTopKs = palloc(queryVectorsSize*sizeof(TopKPV));
+  *pMaxDists = palloc(sizeof(float)*queryVectorsSize);
+  for (int i = 0; i < queryVectorsSize; i++){
+    initTopKPV(&((*pTopKs)[i]), k, maxDist, dim);
+    (*pMaxDists)[i] = maxDist;
+  }
+}
 
 bool inBlacklist(int id, Blacklist* bl){
   if (bl->isValid){
@@ -76,6 +110,72 @@ void addToBlacklist(int id, Blacklist* bl, Blacklist* emptyBl){
   bl->id = id;
   bl->next = emptyBl;
   bl->isValid = true;
+}
+
+void determineCoarseIds(int** pCqIds, int*** pCqTableIds, int** pCqTableIdCounts,
+                        int* queryVectorsIndices, int queryVectorsIndicesSize, int queryVectorsSize,
+                        float maxDist, CoarseQuantizer cq, int cqSize,
+                        float4** queryVectors, int queryDim){
+  int* cqIds;
+  int** cqTableIds;
+  int* cqTableIdCounts;
+  float minDist;
+  float dist;
+
+  *pCqIds = palloc(queryVectorsSize*sizeof(int));
+  cqIds = *pCqIds;
+
+  *pCqTableIds = palloc(sizeof(int*)*cqSize);
+  cqTableIds = *pCqTableIds;
+
+  *pCqTableIdCounts = palloc(sizeof(int)*cqSize);
+  cqTableIdCounts = *pCqTableIdCounts;
+
+  for (int i = 0; i < cqSize; i++){
+    cqTableIds[i] = NULL;
+    cqTableIdCounts[i] = 0;
+  }
+
+  for (int x = 0; x < queryVectorsIndicesSize; x++){
+    int queryIndex = queryVectorsIndices[x];
+    int cqId = -1;
+    minDist = maxDist;
+
+    for (int j=0; j < cqSize; j++){
+      dist = squareDistance(queryVectors[queryIndex], cq[j].vector, queryDim);
+      if (dist < minDist){
+        cqId = j;
+        cqIds[queryIndex] = cqId;
+        minDist = dist;
+      }
+    }
+    if (cqTableIdCounts[cqId] == 0){
+        cqTableIds[cqId] = palloc(sizeof(int)*queryVectorsIndicesSize);
+    }
+    cqTableIds[cqId][cqTableIdCounts[cqId]] = queryIndex;
+    cqTableIdCounts[cqId] += 1;
+  }
+
+}
+
+void postverify(int* queryVectorsIndices, int queryVectorsIndicesSize,
+                int k, int pvf, TopKPV* topKPVs, TopK* topKs, float4** queryVectors,
+                int queryDim, const float maxDistance){
+  for (int x = 0; x < queryVectorsIndicesSize; x++){
+    int queryIndex = queryVectorsIndices[x];
+    float maxDist = maxDistance;
+    float distance;
+    for (int j = 0; j < k*pvf; j++){
+      // calculate distances
+      if (topKPVs[queryIndex][j].id != -1){
+        distance = squareDistance(queryVectors[queryIndex], topKPVs[queryIndex][j].vector, queryDim);
+        if (distance < maxDist){
+          updateTopK(topKs[queryIndex], distance,  topKPVs[queryIndex][j].id, k, maxDist);
+          maxDist = topKs[queryIndex][k-1].distance;
+        }
+      }
+    }
+  }
 }
 
 float squareDistance(float* v1, float* v2, int n){
