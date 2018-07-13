@@ -53,6 +53,17 @@ typedef struct Blacklist{
   struct Blacklist* next;
 } Blacklist;
 
+typedef struct TargetListElem{
+  int16** codes;
+  int* ids;
+  float4** vectors;
+  int size;
+  struct TargetListElem* next;
+  struct TargetListElem* last;
+} TargetListElem;
+
+typedef TargetListElem* TargetLists;
+
 typedef enum {ORIGINAL, NORMALIZED, PQ_QUANTIZATION, CODEBOOK, RESIDUAL_QUANTIZATION, COARSE_QUANTIZATION, RESIDUAL_CODBOOK, RESIDUAL_QUANTIZATION_COMPLETE, IVPQ_QUANTIZATION} tableType;
 
 typedef enum {PARAM_PVF, PARAM_W} parameterType;

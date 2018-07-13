@@ -45,6 +45,13 @@ END
 $$
 LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION set_use_targetlist(flag boolean) RETURNS void AS $$
+BEGIN
+EXECUTE format('CREATE OR REPLACE FUNCTION get_use_targetlist() RETURNS boolean AS ''SELECT ''''%s''''::boolean'' LANGUAGE sql IMMUTABLE', flag);
+END
+$$
+LANGUAGE plpgsql;
+
 CREATE OR REPLACE FUNCTION set_knn_function(name varchar) RETURNS void AS $$
 BEGIN
 EXECUTE format('CREATE OR REPLACE FUNCTION get_knn_function_name() RETURNS varchar AS ''SELECT varchar ''''%s'''''' LANGUAGE sql IMMUTABLE', name);
@@ -103,6 +110,7 @@ SELECT set_pvf(20);
 SELECT set_w(3);
 SELECT set_se(3);
 SELECT set_method_flag(0);
+SELECT set_use_targetlist('true');
 SELECT set_knn_function('k_nearest_neighbour');
 SELECT set_knn_in_function('knn_in_exact');
 SELECT set_knn_batch_function('k_nearest_neighbour_ivfadc_batch');
@@ -254,12 +262,12 @@ CREATE OR REPLACE FUNCTION pq_search_in(bytea, integer, integer[]) RETURNS SETOF
 AS '$libdir/freddy', 'pq_search_in'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE OR REPLACE FUNCTION ivfadc_search_in(bytea[], integer[], integer, integer[], integer, integer, integer) RETURNS SETOF record
+CREATE OR REPLACE FUNCTION ivfadc_search_in(bytea[], integer[], integer, integer[], integer, integer, integer, boolean) RETURNS SETOF record
 AS '$libdir/freddy', 'ivfadc_search_in'
 LANGUAGE C IMMUTABLE STRICT;
 
 -- TODO implement
-CREATE OR REPLACE FUNCTION ivpq_search_in(bytea[], integer[], integer, integer[], integer, integer, integer) RETURNS SETOF record
+CREATE OR REPLACE FUNCTION ivpq_search_in(bytea[], integer[], integer, integer[], integer, integer, integer, boolean) RETURNS SETOF record
 AS '$libdir/freddy', 'ivpq_search_in'
 LANGUAGE C IMMUTABLE STRICT;
 
@@ -554,6 +562,7 @@ formated_queries varchar[];
 ids integer[];
 vectors bytea[];
 words varchar[];
+use_targetlist boolean;
 rec RECORD;
 BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
@@ -561,6 +570,7 @@ EXECUTE 'SELECT get_vecs_name_residual_quantization_complete()' INTO fine_quanti
 EXECUTE 'SELECT get_pvf()' INTO post_verif;
 EXECUTE 'SELECT get_se()' INTO se;
 EXECUTE 'SELECT get_method_flag()' INTO method_flag;
+EXECUTE 'SELECT get_use_targetlist()' INTO use_targetlist;
 FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
   formated[I] = replace(input_set[I], '''', '''''');
 END LOOP;
@@ -576,8 +586,8 @@ FOR rec IN EXECUTE format('SELECT word, vector, id FROM %s WHERE word = ANY(''%s
 END LOOP;
 RETURN QUERY EXECUTE format('
 SELECT f.word, g.word, (1.0 - (distance / 2.0))::float4 as similarity
-FROM %s(''%s''::bytea[], ''%s''::integer[], ''%s''::int, ARRAY(SELECT id FROM %s WHERE word = ANY(''%s''::varchar(100)[])), %s, %s, %s) AS (qid integer, tid integer, distance float4) INNER JOIN %s AS f ON qid = f.id INNER JOIN %s AS g ON tid = g.id;
-', function_name, vectors, ids, k, table_name, formated, se, post_verif, method_flag, table_name, table_name);
+FROM %s(''%s''::bytea[], ''%s''::integer[], ''%s''::int, ARRAY(SELECT id FROM %s WHERE word = ANY(''%s''::varchar(100)[])), %s, %s, %s, ''%s'') AS (qid integer, tid integer, distance float4) INNER JOIN %s AS f ON qid = f.id INNER JOIN %s AS g ON tid = g.id;
+', function_name, vectors, ids, k, table_name, formated, se, post_verif, method_flag, use_targetlist, table_name, table_name);
 END
 $$
 LANGUAGE plpgsql;

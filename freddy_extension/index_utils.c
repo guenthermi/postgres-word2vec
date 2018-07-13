@@ -36,12 +36,13 @@ void updateTopKPV(TopKPV tk, float distance, int id, int k, int maxDist, float4*
   for (int j = k-2; j >= i; j--){
     tk[j+1].distance = tk[j].distance;
     tk[j+1].id = tk[j].id;
-    memcpy(tk[j+1].vector, tk[j].vector, dim*sizeof(float4));
-    //tk[j+1].vector = tk[j].vector;
+    // memcpy(tk[j+1].vector, tk[j].vector, dim*sizeof(float4));
+    tk[j+1].vector = tk[j].vector;
   }
   tk[i].distance = distance;
   tk[i].id = id;
-  memcpy(tk[i].vector, vector, dim*sizeof(float4));
+  tk[i].vector = vector;
+  // memcpy(tk[i].vector, vector, dim*sizeof(float4));
 }
 
 void updateTopKWordEntry(char** term, char* word){
@@ -78,7 +79,8 @@ void initTopKPV(TopKPV* pTopK, int k, const float maxDist, int dim){
   for (int i = 0; i < k; i++){
     (*pTopK)[i].distance = maxDist;
     (*pTopK)[i].id = -1;
-    (*pTopK)[i].vector = palloc(sizeof(float4)*dim);
+    // (*pTopK)[i].vector = palloc(sizeof(float4)*dim);
+    (*pTopK)[i].vector = NULL;
   }
 }
 
@@ -165,6 +167,7 @@ void postverify(int* queryVectorsIndices, int queryVectorsIndicesSize,
     int queryIndex = queryVectorsIndices[x];
     float maxDist = maxDistance;
     float distance;
+
     for (int j = 0; j < k*pvf; j++){
       // calculate distances
       if (topKPVs[queryIndex][j].id != -1){
