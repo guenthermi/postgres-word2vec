@@ -64,7 +64,7 @@ typedef struct TargetListElem{
 
 typedef TargetListElem* TargetLists;
 
-typedef enum {ORIGINAL, NORMALIZED, PQ_QUANTIZATION, CODEBOOK, RESIDUAL_QUANTIZATION, COARSE_QUANTIZATION, RESIDUAL_CODBOOK, RESIDUAL_QUANTIZATION_COMPLETE, IVPQ_QUANTIZATION} tableType;
+typedef enum {ORIGINAL, NORMALIZED, PQ_QUANTIZATION, CODEBOOK, RESIDUAL_QUANTIZATION, COARSE_QUANTIZATION, RESIDUAL_CODBOOK, IVPQ_QUANTIZATION} tableType;
 
 typedef enum {PARAM_PVF, PARAM_W} parameterType;
 
@@ -89,6 +89,8 @@ void initTopKs(TopK** pTopKs, float** pMaxDists, int queryVectorsSize, int k, co
 void initTopKPV(TopKPV* pTopK, int k, const float maxDist, int dim);
 
 void initTopKPVs(TopKPV** pTopKs, float** pMaxDists, int queryVectorsSize, int k, const float maxDist, int dim);
+
+int cmpTopKPVEntry (const void * a, const void * b);
 
 bool inBlacklist(int id, Blacklist* bl);
 

@@ -93,6 +93,10 @@ void initTopKPVs(TopKPV** pTopKs, float** pMaxDists, int queryVectorsSize, int k
   }
 }
 
+int cmpTopKPVEntry (const void * a, const void * b) {
+   return ( (((float)(*(TopKPVEntry*)a).distance) > ((float)(*(TopKPVEntry*)b).distance )) - ((float)((*(TopKPVEntry*)a).distance) < ((float)(*(TopKPVEntry*)b).distance)));
+}
+
 bool inBlacklist(int id, Blacklist* bl){
   if (bl->isValid){
     if (bl->id == id){
@@ -459,7 +463,6 @@ void getTableName(tableType type, char* name, int bufferSize){
     "get_vecs_name_residual_quantization()",
     "get_vecs_name_coarse_quantization()",
     "get_vecs_name_residual_codebook()",
-    "get_vecs_name_residual_quantization_complete()",
     "get_vecs_name_ivpq_quantization()"
   };
 

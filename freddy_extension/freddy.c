@@ -1,4 +1,5 @@
 #define OPT_PREFETCH
+#define OPT_FAST_PV_TOPK_UPDATE
 
 #include "postgres.h"
 #include "funcapi.h"
@@ -72,11 +73,6 @@ inline void initTargetLists(TargetListElem** result, int queryIndicesSize, const
   }
   *result = targetLists;
 }
-
-int cmpTopKPVEntry (const void * a, const void * b) {
-   return ( (((float)(*(TopKPVEntry*)a).distance) > ((float)(*(TopKPVEntry*)b).distance )) - ((float)((*(TopKPVEntry*)a).distance) < ((float)(*(TopKPVEntry*)b).distance)));
-}
-
 
 inline void reorderTopKPV(TopKPV tk, int k, int* fillLevel, float* maxDist){
   qsort(tk, *fillLevel, sizeof(TopKPVEntry), cmpTopKPVEntry);
@@ -502,399 +498,6 @@ ivfadc_search(PG_FUNCTION_ARGS)
   }
 }
 
-PG_FUNCTION_INFO_V1(ivfadc_search_in);
-
-Datum
-ivfadc_search_in(PG_FUNCTION_ARGS)
-{
-
-  FuncCallContext *funcctx;
-  TupleDesc        outtertupdesc;
-  TupleTableSlot  *slot;
-  AttInMetadata   *attinmeta;
-  UsrFctxBatch *usrfctx;
-
-  if (SRF_IS_FIRSTCALL ()){
-
-    MemoryContext  oldcontext;
-
-    // input parameter
-    float4** queryVectors;
-    int queryVectorsSize;
-    int k;
-    // char** inputTerms;
-    int* inputIds;
-    int inputIdsSize;
-    int* queryIds;
-
-    int se; // size of search space is set to about SE*inputTermsSize vectors
-    int pvf; // post verification factor
-    int method; // PQ / EXACT
-
-    // search parameters
-    int queryDim;
-    int subvectorSize;
-    int max_coarse_order; // determine how much vectors for targets are retrieved
-
-    Codebook residualCb;
-    int cbPositions = 0;
-    int cbCodes = 0;
-
-    CoarseQuantizer cq;
-    int cqSize;
-
-    // output variables
-    TopK* topKs;
-    float* maxDists;
-
-    // time measurement
-    clock_t start;
-    clock_t end;
-    clock_t last;
-    clock_t pv_start;
-    clock_t pv_end;
-
-    // helper variables
-    const float MAX_DIST = 1000.0;
-    int n = 0;
-    float4** residualVectors;
-    // int inputTermsPlaneSize; // max size of all input terms together
-    Datum* queryIdData;
-    bool firstIteration = true;
-    TopKPV* topKPVs;
-
-    // for coarse quantizer
-    int* cqIds;
-    float minDist; // sufficient high value
-    int** cqTableIds;
-    int* cqTableIdCounts;
-
-    // for pq similarity calculation
-    float4** querySimilarities;
-
-    Datum* idsData;
-    Datum *i_data; // for query vectors
-
-    int ret;
-    int proc;
-    bool info;
-
-    char* command;
-    char* cur;
-
-    char* tableName = palloc(sizeof(char)*100);
-    char* tableNameResidualCodebook = palloc(sizeof(char)*100);
-    char* tableNameFineQuantizationComplete = palloc(sizeof(char)*100);
-
-    elog(INFO, "start query");
-    start = clock();
-    last = clock();
-
-    getTableName(NORMALIZED, tableName, 100);
-    getTableName(RESIDUAL_CODBOOK, tableNameResidualCodebook, 100);
-    getTableName(RESIDUAL_QUANTIZATION_COMPLETE, tableNameFineQuantizationComplete, 100);
-
-    // residualVector = palloc(sizeof(float))
-
-    funcctx = SRF_FIRSTCALL_INIT ();
-    oldcontext = MemoryContextSwitchTo (funcctx->multi_call_memory_ctx);
-    // get input parameter
-    getArray(PG_GETARG_ARRAYTYPE_P(0), &i_data, &n);
-    queryVectors = palloc(n*sizeof(float4*));
-    queryVectorsSize = n;
-    elog(INFO, "queryvectorssize: %d", queryVectorsSize);
-    for (int i = 0; i < n; i++){
-      queryDim = 0;
-      convert_bytea_float4(DatumGetByteaP(i_data[i]), &queryVectors[i], &queryDim);
-    }
-    n = 0;
-    // for the output it is necessary to map query vectors to ids
-    getArray(PG_GETARG_ARRAYTYPE_P(1), &queryIdData, &n);
-    if (n != queryVectorsSize){
-      elog(ERROR, "Number of query vectors and query vector ids differs!");
-    }
-    queryIds = palloc(queryVectorsSize*sizeof(int));
-    for (int i=0; i< queryVectorsSize; i++){
-      queryIds[i] = DatumGetInt32(queryIdData[i]);
-    }
-    n = 0;
-
-    k = PG_GETARG_INT32(2);
-    getArray(PG_GETARG_ARRAYTYPE_P(3), &idsData, &n); // target words
-    inputIds = palloc(n*sizeof(int));
-    for (int j=0; j< n; j++){
-      inputIds[j] = DatumGetInt32(idsData[j]);
-    }
-    inputIdsSize = n;
-
-    // parameter inputs
-    se = PG_GETARG_INT32(4);
-    pvf = PG_GETARG_INT32(5);
-    method = PG_GETARG_INT32(6); // (0: PQ / 1: EXACT / 2: PQ with post verification)
-    // get codebook
-    residualCb = getCodebook(&cbPositions, &cbCodes, tableNameResidualCodebook);
-    // get coarse quantizer
-    cq = getCoarseQuantizer(&cqSize);
-
-    subvectorSize = queryDim / cbPositions;
-    max_coarse_order = fmax(1, cqSize - (inputIdsSize  / (k* se)));
-    // init topk for output
-    initTopKs(&topKs, &maxDists, queryVectorsSize, k, MAX_DIST);
-    if (method == PQ_PV_CALC){
-      initTopKPVs(&topKPVs, &maxDists, queryVectorsSize, k*pvf, MAX_DIST, queryDim);
-    }
-
-    // TODO create queryIndices data structures
-    int queryVectorsIndicesSize = queryVectorsSize;
-    int* queryVectorsIndices = palloc(sizeof(int)*queryVectorsSize);
-    for (int i = 0; i < queryVectorsSize; i++){
-      queryVectorsIndices[i] = i;
-    }
-
-    proc = 0;
-    while (queryVectorsIndicesSize > 0){
-      // compute coarse tags
-      int coarse_id_tags_size = queryVectorsIndicesSize*(max_coarse_order);
-      int* coarse_id_tags = palloc(coarse_id_tags_size*sizeof(int));
-      int* blacklist = palloc(sizeof(int)*cqSize*cqSize);
-
-      determineCoarseIds(&cqIds, &cqTableIds, &cqTableIdCounts,
-                        queryVectorsIndices,queryVectorsIndicesSize,queryVectorsSize,
-                        MAX_DIST, cq, cqSize, queryVectors, queryDim);
-      if (firstIteration == true){
-        querySimilarities = palloc(sizeof(float4*)*queryVectorsSize);
-        // compute residuals = {queryVector - coarse_quantization(queryVector)}
-        residualVectors = palloc(queryVectorsSize*sizeof(float4*));
-        for (int i = 0; i < queryVectorsSize; i++){
-          residualVectors[i] = palloc(queryDim*sizeof(float4));
-          for (int j = 0; j < queryDim; j++){
-            residualVectors[i][j] = queryVectors[i][j] - cq[cqIds[i]].vector[j];
-          }
-          // compute subvector similarities lookup
-          // determine similarities of codebook entries to residual vector
-          querySimilarities[i] = palloc(cbPositions*cbCodes*sizeof(float4));
-          getPrecomputedDistances(querySimilarities[i], cbPositions, cbCodes, subvectorSize, residualVectors[i], residualCb);
-        }
-
-        end = clock();
-        elog(INFO, "TRACK precomputation_time %f", (double) (end - last) / CLOCKS_PER_SEC);
-        last = clock();
-
-      }
-
-      for (int i = 0; i < cqSize*cqSize; i++){
-        blacklist[i] = 0;
-      }
-
-      for (int i = 0; i < queryVectorsIndicesSize; i++){
-        int queryIndex = queryVectorsIndices[i];
-        for (int j = 0; j < max_coarse_order; j++){
-            if (blacklist[cqIds[queryIndex]*cqSize+j] == 0){
-              coarse_id_tags[i*max_coarse_order+j] = cqSize*cqIds[queryIndex] + j;
-              blacklist[cqIds[queryIndex]*cqSize+j] = 1;
-            }else{
-              coarse_id_tags[i*max_coarse_order+j] = -1;
-            }
-        }
-      }
-      command = palloc(inputIdsSize*10*sizeof(char) + queryVectorsSize*10*sizeof(char)+30000); //TODO revise
-      cur = command;
-      switch(method){
-        case PQ_CALC:
-          cur += sprintf(cur, "SELECT word_id, coarse_tag, vector FROM %s WHERE (coarse_tag IN (", tableNameFineQuantizationComplete);
-          break;
-        case PQ_PV_CALC:
-          cur += sprintf(cur, "SELECT word_id, fq.coarse_tag, fq.vector, vecs.vector FROM %s AS fq INNER JOIN %s AS vecs ON fq.word_id = vecs.id WHERE (coarse_tag IN (", tableNameFineQuantizationComplete, tableName);
-          break;
-        case EXACT_CALC:
-          cur += sprintf(cur, "SELECT word_id, coarse_tag, vecs.vector FROM %s AS fq INNER JOIN %s AS vecs ON fq.word_id = vecs.id WHERE (coarse_tag IN (", tableNameFineQuantizationComplete, tableName );
-          break;
-        default:
-          elog(ERROR, "Unknown computation method!");
-      }
-
-      // fill command
-      for (int i = 0; i < coarse_id_tags_size; i++){
-        if ( i != 0){
-            if (coarse_id_tags[i] != -1){
-              cur += sprintf(cur, ",%d", coarse_id_tags[i]);
-            }
-        }else{
-          cur += sprintf(cur, "%d", coarse_id_tags[i]);
-        }
-      }
-      cur += sprintf(cur, ")) AND (word_id IN (");
-      for (int i = 0; i < inputIdsSize; i++){
-        if ( i == inputIdsSize - 1){
-            cur += sprintf(cur, "%d", inputIds[i]);
-        }else{
-          cur += sprintf(cur, "%d,", inputIds[i]);
-        }
-      }
-
-      sprintf(cur, "))");
-      end = clock();
-      elog(INFO, "TRACK query_construction_time %f", (double) (end - last) / CLOCKS_PER_SEC);
-      last = clock();
-      SPI_connect();
-      ret = SPI_execute(command, true, 0);
-      end = clock();
-      elog(INFO, "TRACK data_retrieval_time %f", (double) (end - last) / CLOCKS_PER_SEC);
-      last = clock();
-      proc = SPI_processed;
-      if (ret > 0 && SPI_tuptable != NULL){
-        TupleDesc tupdesc = SPI_tuptable->tupdesc;
-        SPITupleTable *tuptable = SPI_tuptable;
-        int i;
-        long counter = 0;
-        float4* vector;
-        int vectorPos = -1;
-        if (method == EXACT_CALC){
-          vectorPos = 3;
-        }
-        if (method == PQ_PV_CALC){
-          vectorPos = 4;
-        }
-        elog(INFO, "retrieved %d results", proc);
-        for (i = 0; i < proc; i++){
-          // Datum vectorData;
-          int coarseId;
-          int coarseTag;
-          int16* codes;
-          int wordId;
-          // char* word;
-          float distance;
-          // word, coarse_id, coarse_order, vector
-          HeapTuple tuple = tuptable->vals[i];
-          wordId = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &info));
-          coarseTag = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 2, &info));
-          n = 0;
-          if ((method == PQ_CALC) || (method == PQ_PV_CALC)){
-            convert_bytea_int16(DatumGetByteaP(SPI_getbinval(tuple, tupdesc, 3, &info)), &codes, &n);
-            n = 0;
-          }
-          if ((method == EXACT_CALC) || (method == PQ_PV_CALC)){
-            convert_bytea_float4(DatumGetByteaP(SPI_getbinval(tuple, tupdesc, vectorPos, &info)), &vector, &n);
-            n = 0;
-          }
-          coarseId = (int) (coarseTag / cqSize);
-          if ((method == PQ_CALC) || (method == PQ_PV_CALC)){
-            for (int j = 0; j < cqTableIdCounts[coarseId];j++){
-              int queryVectorsIndex = cqTableIds[coarseId][j];
-              distance = 0;
-              for (int l = 0; l < cbPositions; l++){
-                counter++;
-                distance += querySimilarities[queryVectorsIndex][l*cbCodes + codes[l]];
-              }
-              if (method == PQ_PV_CALC){
-                if (distance < maxDists[queryVectorsIndex]){
-                  updateTopKPV(topKPVs[queryVectorsIndex], distance, wordId, k*pvf, maxDists[queryVectorsIndex], vector, queryDim); // TODO get vector
-                  maxDists[queryVectorsIndex] = topKPVs[queryVectorsIndex][k*pvf-1].distance;
-                }
-              }
-              if (method == PQ_CALC){
-                if (distance < maxDists[queryVectorsIndex]){
-                  updateTopK(topKs[queryVectorsIndex], distance, wordId, k, maxDists[queryVectorsIndex]);
-                  maxDists[queryVectorsIndex] = topKs[queryVectorsIndex][k-1].distance;
-                }
-              }
-            }
-          }
-          if (method == EXACT_CALC){
-            for (int j = 0; j < cqTableIdCounts[coarseId];j++){
-              int queryVectorsIndex = cqTableIds[coarseId][j];
-              distance = squareDistance(queryVectors[queryVectorsIndex], vector, queryDim);
-              if (distance < maxDists[queryVectorsIndex]){
-                updateTopK(topKs[queryVectorsIndex], distance, wordId, k, maxDists[queryVectorsIndex]);
-                maxDists[queryVectorsIndex] = topKs[queryVectorsIndex][k-1].distance;
-              }
-            }
-          }
-        }
-        end = clock();
-        elog(INFO, "TRACK computation_time before postverification %f", (double) (end - last) / CLOCKS_PER_SEC);
-        // post verification
-        if (method == PQ_PV_CALC){
-          pv_start = clock();
-          postverify(queryVectorsIndices, queryVectorsIndicesSize, k, pvf, topKPVs, topKs, queryVectors, queryDim, MAX_DIST);
-          pv_end = clock();
-          elog(INFO, "TRACK pv_computation_time %f", (double) (pv_end - pv_start) / CLOCKS_PER_SEC);
-        }
-
-        end = clock();
-        elog(INFO, "TRACK computation_time %f", (double) (end - last) / CLOCKS_PER_SEC);
-        last = clock();
-        elog(INFO, "finished computation counter %ld",counter);
-      }
-      SPI_finish();
-      int newQueryVectorsIndicesSize = 0;
-      int* newQueryVectorsIndices = palloc(sizeof(int)*queryVectorsIndicesSize);
-      for (int i = 0; i < queryVectorsIndicesSize; i++){
-        if (topKs[queryVectorsIndices[i]][k-1].distance == MAX_DIST){
-          newQueryVectorsIndices[newQueryVectorsIndicesSize] = queryVectorsIndices[i];
-          newQueryVectorsIndicesSize++;
-        }
-      }
-      queryVectorsIndicesSize = newQueryVectorsIndicesSize;
-      queryVectorsIndices = newQueryVectorsIndices;
-      end = clock();
-      elog(INFO, "TRACK recalculate_query_indices_time %f", (double) (end - last) / CLOCKS_PER_SEC);
-      last = clock();
-
-      // claculate new max_coarse_order
-      if (max_coarse_order > cqSize){
-        queryVectorsIndicesSize = 0;
-      }
-      max_coarse_order = max_coarse_order + fmax(1, cqSize - (inputIdsSize  / (k* se)));
-      if (max_coarse_order > cqSize){
-        max_coarse_order = cqSize;
-      }
-      elog(INFO, "max_coarse_order: %d", max_coarse_order);
-
-      firstIteration = false;
-    }
-
-    // return tokKs
-    usrfctx = (UsrFctxBatch*) palloc (sizeof (UsrFctxBatch));
-    fillUsrFctxBatch(usrfctx, queryIds, queryVectorsSize, topKs, k);
-    funcctx -> user_fctx = (void *)usrfctx;
-    outtertupdesc = CreateTemplateTupleDesc (3 , false);
-
-    TupleDescInitEntry (outtertupdesc,  1, "QueryId",    INT4OID, -1, 0);
-    TupleDescInitEntry (outtertupdesc,  2, "TargetId",    INT4OID, -1, 0);
-    // TupleDescInitEntry (outtertupdesc,  2, "Target",    VARCHAROID, -1, 0); // TODO word
-    TupleDescInitEntry (outtertupdesc,  3, "Distance",FLOAT4OID,  -1, 0);
-    slot = TupleDescGetSlot (outtertupdesc);
-    funcctx -> slot = slot;
-    attinmeta = TupleDescGetAttInMetadata (outtertupdesc);
-    funcctx -> attinmeta = attinmeta;
-    end = clock();
-    elog(INFO, "TRACK total_time %f", (double) (end - start) / CLOCKS_PER_SEC);
-    MemoryContextSwitchTo (oldcontext);
-    // end = clock();
-    // elog(INFO,"total time %f", (double) (end - start) / CLOCKS_PER_SEC);
-  }
-  funcctx = SRF_PERCALL_SETUP ();
-  usrfctx = (UsrFctxBatch*) funcctx -> user_fctx;
-  // return results
-  if (usrfctx->iter >= usrfctx->k * usrfctx->queryIdsSize){
-      SRF_RETURN_DONE (funcctx);
-  }else{
-    Datum result;
-    HeapTuple outTuple;
-    snprintf(usrfctx->values[0], 16, "%d", usrfctx->queryIds[usrfctx->iter / usrfctx->k]);
-    snprintf(usrfctx->values[1], 16, "%d", usrfctx->tk[usrfctx->iter / usrfctx->k][usrfctx->iter % usrfctx->k].id);
-    snprintf(usrfctx->values[2], 16, "%f", usrfctx->tk[usrfctx->iter / usrfctx->k][usrfctx->iter % usrfctx->k].distance);
-    usrfctx->iter++;
-    outTuple = BuildTupleFromCStrings (funcctx -> attinmeta,
-                usrfctx -> values);
-    result = TupleGetDatum (funcctx -> slot, outTuple);
-    SRF_RETURN_NEXT(funcctx, result);
-
-  }
-
-}
-
 PG_FUNCTION_INFO_V1(ivpq_search_in);
 
 Datum
@@ -945,24 +548,26 @@ ivpq_search_in(PG_FUNCTION_ARGS)
 
 
       // time measurement
-      clock_t start;
-      clock_t end;
-      clock_t last;
-      clock_t pv_start;
-      clock_t pv_end;
+      clock_t start = 0;
+      clock_t end = 0;
+      clock_t last = 0;
+      clock_t sub_start = 0;
+      clock_t sub_end = 0 ;
 
       // helper variables
       int n = 0;
       Datum* queryIdData;
 
-      TopKPV* topKPVs;
-      int* fillLevels;
+      int queryVectorsIndicesSize;
+      int* queryVectorsIndices;
 
-      TargetLists targetLists;
+      TopKPV* topKPVs;
+      int* fillLevels = NULL;
+
+      TargetLists targetLists = NULL;
 
       // for coarse quantizer
       int* cqIds;
-      float minDist; // sufficient high value
       int** cqTableIds;
       int* cqTableIdCounts;
 
@@ -989,7 +594,7 @@ ivpq_search_in(PG_FUNCTION_ARGS)
       last = clock();
 
       getTableName(NORMALIZED, tableName, 100);
-      getTableName(CODEBOOK, tableNameCodebook, 100); // TODO new names
+      getTableName(CODEBOOK, tableNameCodebook, 100);
       getTableName(IVPQ_QUANTIZATION, tableNameFineQuantizationIVPQ, 100);
 
       funcctx = SRF_FIRSTCALL_INIT ();
@@ -1030,6 +635,12 @@ ivpq_search_in(PG_FUNCTION_ARGS)
       method = PG_GETARG_INT32(6); // (0: PQ / 1: EXACT / 2: PQ with post verification)
       useTargetLists = PG_GETARG_BOOL(7);
 
+      queryVectorsIndicesSize = queryVectorsSize;
+      queryVectorsIndices = palloc(sizeof(int)*queryVectorsSize);
+      for (int i = 0; i < queryVectorsSize; i++){
+        queryVectorsIndices[i] = i;
+      }
+
       if ((method == PQ_CALC) || (method == PQ_PV_CALC)){
         // get codebook
         cb = getCodebook(&cbPositions, &cbCodes, tableNameCodebook);
@@ -1042,14 +653,20 @@ ivpq_search_in(PG_FUNCTION_ARGS)
       // init topk data structures
       initTopKs(&topKs, &maxDists, queryVectorsSize, k, MAX_DIST);
       if (method == PQ_PV_CALC){
-        initTopKPVs(&topKPVs, &maxDists, queryVectorsSize, TOPK_BATCH_SIZE+k*pvf, MAX_DIST, queryDim);
-        fillLevels = palloc(queryVectorsSize*sizeof(int)); // TODO implement this id initTopKPVs
-        for (int i = 0; i < queryVectorsSize; i++){
-          fillLevels[i] = 0;
-        }
+        #ifdef OPT_FAST_PV_TOPK_UPDATE
+          initTopKPVs(&topKPVs, &maxDists, queryVectorsSize, TOPK_BATCH_SIZE+k*pvf, MAX_DIST, queryDim);
+          fillLevels = palloc(queryVectorsSize*sizeof(int));
+          for (int i = 0; i < queryVectorsSize; i++){
+            fillLevels[i] = 0;
+          }
+        #endif
+        #ifndef OPT_FAST_PV_TOPK_UPDATE
+          initTopKPVs(&topKPVs, &maxDists, queryVectorsSize, k*pvf, MAX_DIST, queryDim);
+        #endif
+        end = clock();
+        elog(INFO, "TRACK setup_topkpv_time %f", (double) (end - last) / CLOCKS_PER_SEC);
       }
-      end = clock();
-      elog(INFO, "TRACK precomputation_time1 %f", (double) (end - last) / CLOCKS_PER_SEC);
+
       if ((method == PQ_CALC) || (method == PQ_PV_CALC)){
         // compute querySimilarities (precomputed distances) for product quantization
         querySimilarities = palloc(sizeof(float4*)*queryVectorsSize);
@@ -1057,12 +674,6 @@ ivpq_search_in(PG_FUNCTION_ARGS)
           querySimilarities[i] = palloc(cbPositions*cbCodes*sizeof(float4));
           getPrecomputedDistances(querySimilarities[i], cbPositions, cbCodes, subvectorSize, queryVectors[i], cb);
         }
-      }
-
-      int queryVectorsIndicesSize = queryVectorsSize;
-      int* queryVectorsIndices = palloc(sizeof(int)*queryVectorsSize);
-      for (int i = 0; i < queryVectorsSize; i++){
-        queryVectorsIndices[i] = i;
       }
 
       end = clock();
@@ -1074,11 +685,17 @@ ivpq_search_in(PG_FUNCTION_ARGS)
         char* coarse_id_columns;
         // compute coarse ids
         int coarse_ids_size = 0;
-        int* blacklist = palloc(sizeof(int)*cqSize);
+        int* blacklist = palloc(sizeof(int)*cqSize); // query should not contain coarse ids multiple times
         int* coarse_ids = palloc(sizeof(int)*cqSize);
 
-        if (useTargetLists){
-            initTargetLists(&targetLists, queryVectorsSize, TARGET_LISTS_SIZE, method);
+        int newQueryVectorsIndicesSize;
+        int* newQueryVectorsIndices;
+
+        if ((useTargetLists) && (method != EXACT_CALC)){
+          end = clock();
+          initTargetLists(&targetLists, queryVectorsSize, TARGET_LISTS_SIZE, method);
+          last = clock();
+          elog(INFO, "TRACK init_targetlist_time %f", (double) (sub_end - sub_start) / CLOCKS_PER_SEC);
         }
 
         determineCoarseIds(&cqIds, &cqTableIds, &cqTableIdCounts,
@@ -1153,138 +770,152 @@ ivpq_search_in(PG_FUNCTION_ARGS)
         elog(INFO, "TRACK data_retrieval_time %f", (double) (end - last) / CLOCKS_PER_SEC);
         last = clock();
         proc = SPI_processed;
+        elog(INFO, "retrieved %d results", proc);
         if (ret > 0 && SPI_tuptable != NULL){
           TupleDesc tupdesc = SPI_tuptable->tupdesc;
           SPITupleTable *tuptable = SPI_tuptable;
           int i;
           long counter = 0;
-          elog(INFO, "retrieved %d results", proc);
-              float4* vector; // for post verification
-              int offset = (method == PQ_PV_CALC) ? 4 : 3; // position offset for coarseIds
-              long* indices = palloc(sizeof(long)*cbPositions);
-              int l;
-              int* codes2 = palloc(sizeof(int)*cbPositions);
+          float4* vector; // for post verification
+          int offset = (method == PQ_PV_CALC) ? 4 : 3; // position offset for coarseIds
+          long* indices = palloc(sizeof(long)*cbPositions);
+          int l;
+          int* codes2 = palloc(sizeof(int)*cbPositions);
 
-              for (i = 0; i < proc; i++){
-                int coarseId;
-                int16* codes;
-                int wordId;
-                float distance;
-                float* next;
-                HeapTuple tuple = tuptable->vals[i];
-                wordId = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &info));
-                n = 0;
-                if ((method == PQ_PV_CALC) || (method == PQ_CALC)){
-                  convert_bytea_int16(DatumGetByteaP(SPI_getbinval(tuple, tupdesc, 2, &info)), &codes, &n);
-                  n = 0;
-                }
-                if (method == EXACT_CALC){
-                  convert_bytea_float4(DatumGetByteaP(SPI_getbinval(tuple, tupdesc, 2, &info)), &vector, &n);
-                  n = 0;
-                }
-                if (method == PQ_PV_CALC){
-                  convert_bytea_float4(DatumGetByteaP(SPI_getbinval(tuple, tupdesc, 3, &info)), &vector, &n);
-                  n = 0;
-                }
-                for (l = 0; l < cbPositions; l++){
-                  indices[l] = l*cbCodes + codes[l];
-                  codes2[l] = codes[l];
-                }
-                for (int o=0; o < max_coarse_order; o++){
-                  // read coarse ids
-                  coarseId = DatumGetInt32(SPI_getbinval(tuple, tupdesc, o+offset, &info));
-                  // calculate distances
-                  for (int j = 0; j < cqTableIdCounts[coarseId];j++){
-                    int queryVectorsIndex = cqTableIds[coarseId][j];
+          for (i = 0; i < proc; i++){
+            int coarseId;
+            int16* codes;
+            int wordId;
+            float distance;
+            float* next;
+            HeapTuple tuple = tuptable->vals[i];
+            wordId = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &info));
+            n = 0;
+            if ((method == PQ_PV_CALC) || (method == PQ_CALC)){
+              convert_bytea_int16(DatumGetByteaP(SPI_getbinval(tuple, tupdesc, 2, &info)), &codes, &n);
+              n = 0;
+            }
+            if (method == EXACT_CALC){
+              convert_bytea_float4(DatumGetByteaP(SPI_getbinval(tuple, tupdesc, 2, &info)), &vector, &n);
+              n = 0;
+            }
+            if (method == PQ_PV_CALC){
+              convert_bytea_float4(DatumGetByteaP(SPI_getbinval(tuple, tupdesc, 3, &info)), &vector, &n);
+              n = 0;
+            }
+            for (l = 0; l < cbPositions; l++){
+              indices[l] = l*cbCodes + codes[l];
+              codes2[l] = codes[l];
+            }
+            for (int o=0; o < max_coarse_order; o++){
+              // read coarse ids
+              coarseId = DatumGetInt32(SPI_getbinval(tuple, tupdesc, o+offset, &info));
+              // calculate distances
+              for (int j = 0; j < cqTableIdCounts[coarseId];j++){
+                int queryVectorsIndex = cqTableIds[coarseId][j];
 
-                    if ((method == PQ_CALC) || (method == PQ_PV_CALC)){
-                      if (useTargetLists){
-                        // add codes and word id to the target list which corresonds to the query
-                        addToTargetList(targetLists, queryVectorsIndex, TARGET_LISTS_SIZE, method,codes, vector, wordId);
-                      }else{
+                if ((method == PQ_CALC) || (method == PQ_PV_CALC)){
+                  if (useTargetLists){
+                    // add codes and word id to the target list which corresonds to the query
+                    addToTargetList(targetLists, queryVectorsIndex, TARGET_LISTS_SIZE, method,codes, vector, wordId);
+                  }else{
 
-                        #ifdef OPT_PREFETCH
-                        if (j % 100 == 0){
-                          for (int n = 0; n < 200; n++){
-                            if (j + n < cqTableIdCounts[coarseId]){
-                              next = querySimilarities[cqTableIds[coarseId][j+n]];
-                              for (l = 0; l < cbPositions; l++){
-                                __builtin_prefetch(&next[cbCodes*l+ codes2[l]],0);
-                              }
-                            }
-                          }
-                        }
-                        #endif /*OPT_PREFETCH*/
-
-                        distance = computePQDistance(querySimilarities[queryVectorsIndex], codes2, cbPositions, cbCodes);
-                        if (method == PQ_PV_CALC){
-                          if (distance < maxDists[queryVectorsIndex]){
-                            updateTopKPVFast(topKPVs[queryVectorsIndex], TOPK_BATCH_SIZE+k*pvf, k*pvf, &fillLevels[queryVectorsIndex], &maxDists[queryVectorsIndex], queryDim, wordId, distance, vector);
-                          }
-                        }
-                        if (method == PQ_CALC){
-                          if (distance < maxDists[queryVectorsIndex]){
-                            updateTopK(topKs[queryVectorsIndex], distance, wordId, k, maxDists[queryVectorsIndex]);
-                            maxDists[queryVectorsIndex] = topKs[queryVectorsIndex][k-1].distance;
+                    #ifdef OPT_PREFETCH
+                    if (j % 100 == 0){
+                      for (int n = 0; n < 200; n++){
+                        if (j + n < cqTableIdCounts[coarseId]){
+                          next = querySimilarities[cqTableIds[coarseId][j+n]];
+                          for (l = 0; l < cbPositions; l++){
+                            __builtin_prefetch(&next[cbCodes*l+ codes2[l]],0);
                           }
                         }
                       }
-                    }else{
-                      // method == EXACT_CALC
-                      distance = squareDistance(queryVectors[queryVectorsIndex], vector, queryDim);
+                    }
+                    #endif /*OPT_PREFETCH*/
+
+                    distance = computePQDistance(querySimilarities[queryVectorsIndex], codes2, cbPositions, cbCodes);
+                    if (method == PQ_PV_CALC){
+                      if (distance < maxDists[queryVectorsIndex]){
+                        #ifdef OPT_FAST_PV_TOPK_UPDATE
+                          updateTopKPVFast(topKPVs[queryVectorsIndex], TOPK_BATCH_SIZE+k*pvf, k*pvf, &fillLevels[queryVectorsIndex], &maxDists[queryVectorsIndex], queryDim, wordId, distance, vector);
+                        #endif
+                        #ifndef OPT_FAST_PV_TOPK_UPDATE
+                          updateTopKPV(topKPVs[queryVectorsIndex], distance, wordId, k*pvf, maxDists[queryVectorsIndex], vector, queryDim);
+                          maxDists[queryVectorsIndex] = topKPVs[queryVectorsIndex][k*pvf-1].distance;
+                        #endif
+                      }
+                    }
+                    if (method == PQ_CALC){
                       if (distance < maxDists[queryVectorsIndex]){
                         updateTopK(topKs[queryVectorsIndex], distance, wordId, k, maxDists[queryVectorsIndex]);
                         maxDists[queryVectorsIndex] = topKs[queryVectorsIndex][k-1].distance;
                       }
                     }
                   }
-
-                }
-              }
-
-              if (useTargetLists && ((method == PQ_CALC) || (method == PQ_PV_CALC))){
-                elog(INFO, "TRACK reorder_time %f", (double) (clock() - last) / CLOCKS_PER_SEC);
-              // calculate distances with target list
-                for (i = 0; i < queryVectorsIndicesSize; i++){
-                  int queryVectorsIndex = queryVectorsIndices[i];
-                  // TODO may prefetch querySimilarities in cache
-                  TargetListElem* current = &targetLists[queryVectorsIndex];
-                  while(current != NULL){
-                    for (int j = 0; j < current->size;j++){
-                      float distance = 0;
-                      for (int l = 0; l < cbPositions; l++){
-                        distance +=  querySimilarities[queryVectorsIndex][cbCodes*l+ current->codes[j][l]];
-                      }
-                      if (method == PQ_PV_CALC){
-                        if (distance < maxDists[queryVectorsIndex]){
-                          updateTopKPVFast(topKPVs[queryVectorsIndex], TOPK_BATCH_SIZE+k*pvf, k*pvf, &fillLevels[queryVectorsIndex], &maxDists[queryVectorsIndex], queryDim, current->ids[j], distance, current->vectors[j]);
-                        }
-                      }
-                      if (method == PQ_CALC){
-                        if (distance < maxDists[queryVectorsIndex]){
-                          updateTopK(topKs[queryVectorsIndex], distance, current->ids[j], k, maxDists[queryVectorsIndex]);
-                          maxDists[queryVectorsIndex] = topKs[queryVectorsIndex][k-1].distance;
-                        }
-                      }
-                    }
-                    current = current->next;
+                }else{
+                  // method == EXACT_CALC
+                  distance = squareDistance(queryVectors[queryVectorsIndex], vector, queryDim);
+                  if (distance < maxDists[queryVectorsIndex]){
+                    updateTopK(topKs[queryVectorsIndex], distance, wordId, k, maxDists[queryVectorsIndex]);
+                    maxDists[queryVectorsIndex] = topKs[queryVectorsIndex][k-1].distance;
                   }
                 }
               }
 
+            }
+          }
+
+          if (useTargetLists && ((method == PQ_CALC) || (method == PQ_PV_CALC))){
+            elog(INFO, "TRACK reorder_time %f", (double) (clock() - last) / CLOCKS_PER_SEC);
+          // calculate distances with target list
+            for (i = 0; i < queryVectorsIndicesSize; i++){
+              int queryVectorsIndex = queryVectorsIndices[i];
+              // TODO may prefetch querySimilarities in cache
+              TargetListElem* current = &targetLists[queryVectorsIndex];
+              while(current != NULL){
+                for (int j = 0; j < current->size;j++){
+                  float distance = 0;
+                  for (int l = 0; l < cbPositions; l++){
+                    distance +=  querySimilarities[queryVectorsIndex][cbCodes*l+ current->codes[j][l]];
+                  }
+                  if (method == PQ_PV_CALC){
+                    if (distance < maxDists[queryVectorsIndex]){
+                      #ifdef OPT_FAST_PV_TOPK_UPDATE
+                        updateTopKPVFast(topKPVs[queryVectorsIndex], TOPK_BATCH_SIZE+k*pvf, k*pvf, &fillLevels[queryVectorsIndex], &maxDists[queryVectorsIndex], queryDim, current->ids[j], distance, current->vectors[j]);
+                      #endif
+                      #ifndef OPT_FAST_PV_TOPK_UPDATE
+                        updateTopKPV(topKPVs[queryVectorsIndex], distance, current->ids[j], k*pvf, maxDists[queryVectorsIndex], current->vectors[j], queryDim);
+                        maxDists[queryVectorsIndex] = topKPVs[queryVectorsIndex][k*pvf-1].distance;
+                      #endif
+                    }
+                  }
+                  if (method == PQ_CALC){
+                    if (distance < maxDists[queryVectorsIndex]){
+                      updateTopK(topKs[queryVectorsIndex], distance, current->ids[j], k, maxDists[queryVectorsIndex]);
+                      maxDists[queryVectorsIndex] = topKs[queryVectorsIndex][k-1].distance;
+                    }
+                  }
+                }
+                current = current->next;
+              }
+            }
+          }
+
           // post verification
           if (method == PQ_PV_CALC){
-            pv_start = clock();
-            for (int i = 0; i<queryVectorsIndicesSize;i++){
-              int queryIndex = queryVectorsIndices[i];
-              reorderTopKPV(topKPVs[queryIndex], k*pvf, &fillLevels[queryIndex], &maxDists[queryIndex]);
-            }
-            pv_end = clock();
-            elog(INFO, "TRACK reorder_time %f", (double) (pv_end - pv_start) / CLOCKS_PER_SEC);
-            pv_start = clock();
+            #ifdef OPT_FAST_PV_TOPK_UPDATE
+              sub_start = clock();
+              for (int i = 0; i<queryVectorsIndicesSize;i++){
+                int queryIndex = queryVectorsIndices[i];
+                reorderTopKPV(topKPVs[queryIndex], k*pvf, &fillLevels[queryIndex], &maxDists[queryIndex]);
+              }
+              sub_end = clock();
+              elog(INFO, "TRACK topkpv_reorder_time %f", (double) (sub_end - sub_start) / CLOCKS_PER_SEC);
+            #endif
+            sub_start = clock();
             postverify(queryVectorsIndices, queryVectorsIndicesSize, k, pvf, topKPVs, topKs, queryVectors, queryDim, MAX_DIST);
-            pv_end = clock();
-            elog(INFO, "TRACK pv_computation_time %f", (double) (pv_end - pv_start) / CLOCKS_PER_SEC);
+            sub_end = clock();
+            elog(INFO, "TRACK pv_computation_time %f", (double) (sub_end - sub_start) / CLOCKS_PER_SEC);
           }
 
           end = clock();
@@ -1295,8 +926,8 @@ ivpq_search_in(PG_FUNCTION_ARGS)
         }
         SPI_finish();
         // recalcalculate queryIndices
-        int newQueryVectorsIndicesSize = 0;
-        int* newQueryVectorsIndices = palloc(sizeof(int)*queryVectorsIndicesSize);
+        newQueryVectorsIndicesSize = 0;
+        newQueryVectorsIndices = palloc(sizeof(int)*queryVectorsIndicesSize);
         for (int i = 0; i < queryVectorsIndicesSize; i++){
           if (topKs[queryVectorsIndices[i]][k-1].distance == MAX_DIST){
             newQueryVectorsIndices[newQueryVectorsIndicesSize] = queryVectorsIndices[i];
@@ -1305,8 +936,13 @@ ivpq_search_in(PG_FUNCTION_ARGS)
             initTopK(&topKs[queryVectorsIndices[i]], k, MAX_DIST);
             maxDists[queryVectorsIndices[i]] = MAX_DIST;
             if (method == PQ_PV_CALC){
-              initTopKPV(&topKPVs[queryVectorsIndices[i]], TOPK_BATCH_SIZE+k*pvf, MAX_DIST, queryDim);
-              fillLevels[i] = 0;
+              #ifdef OPT_FAST_PV_TOPK_UPDATE
+                initTopKPV(&topKPVs[queryVectorsIndices[i]], TOPK_BATCH_SIZE+k*pvf, MAX_DIST, queryDim);
+                fillLevels[i] = 0;
+              #endif
+              #ifndef OPT_FAST_PV_TOPK_UPDATE
+                initTopKPV(&topKPVs[queryVectorsIndices[i]], k*pvf, MAX_DIST, queryDim);
+              #endif
             }
 
           }
