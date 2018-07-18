@@ -692,9 +692,9 @@ ivpq_search_in(PG_FUNCTION_ARGS)
         int* newQueryVectorsIndices;
 
         if ((useTargetLists) && (method != EXACT_CALC)){
-          end = clock();
+          sub_start = clock();
           initTargetLists(&targetLists, queryVectorsSize, TARGET_LISTS_SIZE, method);
-          last = clock();
+          sub_end = clock();
           elog(INFO, "TRACK init_targetlist_time %f", (double) (sub_end - sub_start) / CLOCKS_PER_SEC);
         }
 
@@ -816,6 +816,17 @@ ivpq_search_in(PG_FUNCTION_ARGS)
 
                 if ((method == PQ_CALC) || (method == PQ_PV_CALC)){
                   if (useTargetLists){
+                    #ifdef OPT_PREFETCH
+                    if (j % 25 == 0){
+                      for (int n = 0; n < 50; n++){
+                        if (j + n < cqTableIdCounts[coarseId]){
+                          __builtin_prefetch(&cqTableIds[coarseId][j+n],0);
+                          __builtin_prefetch(&targetLists[cqTableIds[coarseId][j+n]],0);
+                          __builtin_prefetch(&(*(targetLists[cqTableIds[coarseId][j+n]]).last),1);
+                        }
+                      }
+                    }
+                    #endif /*OPT_PREFETCH*/
                     // add codes and word id to the target list which corresonds to the query
                     addToTargetList(targetLists, queryVectorsIndex, TARGET_LISTS_SIZE, method,codes, vector, wordId);
                   }else{
