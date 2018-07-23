@@ -656,7 +656,7 @@ ivpq_search_in(PG_FUNCTION_ARGS)
       }
       // get coarse quantizer
       cq = getCoarseQuantizer(&cqSize);
-      max_coarse_order = (int) fmax((double) 1.0, (double) cqSize - ((double) inputIdsSize  / ((double)(k* se))));
+      max_coarse_order = se;
       elog(INFO, "max_coarse_order %d", max_coarse_order);
       // init topk data structures
       initTopKs(&topKs, &maxDists, queryVectorsSize, k, MAX_DIST);
@@ -977,7 +977,7 @@ ivpq_search_in(PG_FUNCTION_ARGS)
         if (max_coarse_order > cqSize){
           queryVectorsIndicesSize = 0;
         }
-        max_coarse_order = max_coarse_order + fmax(1, cqSize - (inputIdsSize  / (k* se)));
+        max_coarse_order += se;
         if (max_coarse_order > cqSize){
           max_coarse_order = cqSize;
         }
