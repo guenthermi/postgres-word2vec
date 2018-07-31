@@ -514,6 +514,7 @@ ivpq_search_in(PG_FUNCTION_ARGS)
     const float MAX_DIST = 1000.0;
     const int TOPK_BATCH_SIZE = 200;
     const int TARGET_LISTS_SIZE = 1000;
+    const bool USE_STATISTICS = true;
 
     FuncCallContext *funcctx;
     TupleDesc        outtertupdesc;
@@ -537,6 +538,8 @@ ivpq_search_in(PG_FUNCTION_ARGS)
       int pvf; // post verification factor
       int method; // PQ / EXACT
       bool useTargetLists;
+      float confidence;
+      bool singleColumnMode = true;
 
       // search parameters
       int queryDim;
@@ -549,6 +552,8 @@ ivpq_search_in(PG_FUNCTION_ARGS)
 
       CoarseQuantizer cq;
       int cqSize;
+
+      float* statistics;
 
       // output variables
       TopK* topKs;
@@ -576,6 +581,7 @@ ivpq_search_in(PG_FUNCTION_ARGS)
 
       // for coarse quantizer
       int* cqIds;
+      int** cqIdsMulti;
       int** cqTableIds;
       int* cqTableIdCounts;
 
@@ -642,6 +648,7 @@ ivpq_search_in(PG_FUNCTION_ARGS)
       pvf = PG_GETARG_INT32(5);
       method = PG_GETARG_INT32(6); // (0: PQ / 1: EXACT / 2: PQ with post verification)
       useTargetLists = PG_GETARG_BOOL(7);
+      confidence = PG_GETARG_FLOAT4(8);
 
       queryVectorsIndicesSize = queryVectorsSize;
       queryVectorsIndices = palloc(sizeof(int)*queryVectorsSize);
@@ -656,8 +663,13 @@ ivpq_search_in(PG_FUNCTION_ARGS)
       }
       // get coarse quantizer
       cq = getCoarseQuantizer(&cqSize);
+      sub_start = clock();
+      // get statistics about coarse centroid distribution
+      statistics = getStatistics();
+      sub_end = clock();
+      elog(INFO, "TRACK get_statistics_time %f", (double) (sub_end - sub_start) / CLOCKS_PER_SEC);
       max_coarse_order = se;
-      elog(INFO, "max_coarse_order %d", max_coarse_order);
+      elog(INFO, "new iteration: max_coarse_order %d", max_coarse_order);
       // init topk data structures
       initTopKs(&topKs, &maxDists, queryVectorsSize, k, MAX_DIST);
       if (method == PQ_PV_CALC){
@@ -699,6 +711,14 @@ ivpq_search_in(PG_FUNCTION_ARGS)
         int newQueryVectorsIndicesSize;
         int* newQueryVectorsIndices;
 
+        int numberOfCoarseIds;
+
+        if (singleColumnMode){
+          numberOfCoarseIds = 1;
+        }else{
+          numberOfCoarseIds = max_coarse_order;
+        }
+
         if ((useTargetLists) && (method != EXACT_CALC)){
           sub_start = clock();
           initTargetLists(&targetLists, queryVectorsSize, TARGET_LISTS_SIZE, method);
@@ -706,26 +726,54 @@ ivpq_search_in(PG_FUNCTION_ARGS)
           elog(INFO, "TRACK init_targetlist_time %f", (double) (sub_end - sub_start) / CLOCKS_PER_SEC);
         }
 
-        determineCoarseIds(&cqIds, &cqTableIds, &cqTableIdCounts,
-                          queryVectorsIndices,queryVectorsIndicesSize,queryVectorsSize,
-                          MAX_DIST, cq, cqSize, queryVectors, queryDim);
-        for (int i = 0; i < cqSize; i++){
+        for (int i = 0; i < cqSize; i++){ // for construction of target query needed
           blacklist[i] = 0;
         }
-        for (int x = 0; x < queryVectorsIndicesSize; x++){
-          int queryIndex = queryVectorsIndices[x];
-          if (blacklist[cqIds[queryIndex]] == 0){
-            blacklist[cqIds[queryIndex]] = 1;
-            coarse_ids[coarse_ids_size] = cqIds[queryIndex];
-            coarse_ids_size += 1;
+
+
+
+        if (singleColumnMode){
+          if (USE_STATISTICS){
+            sub_start = clock();
+            determineCoarseIdsMultiWithStatistics(&cqIdsMulti, &cqTableIds, &cqTableIdCounts,
+                              queryVectorsIndices,queryVectorsIndicesSize,queryVectorsSize,
+                              MAX_DIST, cq, cqSize, queryVectors, queryDim, statistics, inputIdsSize, (k*se), confidence);
+            sub_end = clock();
+            elog(INFO, "TRACK determine_coarse_quantization_time %f", (double) (sub_end - sub_start) / CLOCKS_PER_SEC);
+          }else{
+            sub_start = clock();
+            determineCoarseIdsMulti(&cqIdsMulti, &cqTableIds, &cqTableIdCounts,
+                              queryVectorsIndices,queryVectorsIndicesSize,queryVectorsSize,
+                              MAX_DIST, cq, cqSize, queryVectors, queryDim, max_coarse_order);
+            sub_end = clock();
+            elog(INFO, "TRACK determine_coarse_quantization_time %f", (double) (sub_end - sub_start) / CLOCKS_PER_SEC);
+          }
+
+          for (int i = 0; i < cqSize; i++){
+            if (cqTableIdCounts[i] > 0){
+              coarse_ids[coarse_ids_size] = i;
+              coarse_ids_size += 1;
+            }
+          }
+        }else{
+          determineCoarseIds(&cqIds, &cqTableIds, &cqTableIdCounts,
+                            queryVectorsIndices,queryVectorsIndicesSize,queryVectorsSize,
+                            MAX_DIST, cq, cqSize, queryVectors, queryDim);
+          for (int x = 0; x < queryVectorsIndicesSize; x++){
+            int queryIndex = queryVectorsIndices[x];
+            if (blacklist[cqIds[queryIndex]] == 0){
+              blacklist[cqIds[queryIndex]] = 1;
+              coarse_ids[coarse_ids_size] = cqIds[queryIndex];
+              coarse_ids_size += 1;
+            }
           }
         }
 
         end = clock();
         coarse_id_columns = palloc(sizeof(char)*(10*cqSize));
         cur = coarse_id_columns;
-        for (int i = 0; i < max_coarse_order; i++){
-          if (i == max_coarse_order - 1){
+        for (int i = 0; i < numberOfCoarseIds; i++){
+          if (i ==numberOfCoarseIds - 1){
             cur += sprintf(cur, "coarse_id_%d", i);
           }else{
             cur += sprintf(cur, "coarse_id_%d,", i);
@@ -747,8 +795,8 @@ ivpq_search_in(PG_FUNCTION_ARGS)
             elog(ERROR, "Unknown computation method!");
         }
         // fill command
-        for (int o = 0; o < max_coarse_order; o++){
-          cur += sprintf(cur, "(coarse_id_%d IN ( ", o);
+        if (singleColumnMode){
+          cur += sprintf(cur, "(coarse_id_0 IN ( ");
           for (int i = 0; i < coarse_ids_size; i++){
             if ( i != 0){
               cur += sprintf(cur, ",%d", coarse_ids[i]);
@@ -756,8 +804,19 @@ ivpq_search_in(PG_FUNCTION_ARGS)
               cur += sprintf(cur, "%d", coarse_ids[i]);
             }
           }
-          if (o != (max_coarse_order - 1)){
-            cur += sprintf(cur, ")) OR ");
+        }else{
+          for (int o = 0; o < max_coarse_order; o++){
+            cur += sprintf(cur, "(coarse_id_%d IN ( ", o);
+            for (int i = 0; i < coarse_ids_size; i++){
+              if ( i != 0){
+                cur += sprintf(cur, ",%d", coarse_ids[i]);
+              }else{
+                cur += sprintf(cur, "%d", coarse_ids[i]);
+              }
+            }
+            if (o != (max_coarse_order - 1)){
+              cur += sprintf(cur, ")) OR ");
+            }
           }
         }
         cur += sprintf(cur, "))) AND (word_id IN (");
@@ -778,7 +837,7 @@ ivpq_search_in(PG_FUNCTION_ARGS)
         elog(INFO, "TRACK data_retrieval_time %f", (double) (end - last) / CLOCKS_PER_SEC);
         last = clock();
         proc = SPI_processed;
-        elog(INFO, "retrieved %d results", proc);
+        elog(INFO, "TRACK retrieved %d results", proc);
         if (ret > 0 && SPI_tuptable != NULL){
           TupleDesc tupdesc = SPI_tuptable->tupdesc;
           SPITupleTable *tuptable = SPI_tuptable;
@@ -815,7 +874,8 @@ ivpq_search_in(PG_FUNCTION_ARGS)
               indices[l] = l*cbCodes + codes[l];
               codes2[l] = codes[l];
             }
-            for (int o=0; o < max_coarse_order; o++){
+
+            for (int o=0; o < numberOfCoarseIds; o++){
               // read coarse ids
               coarseId = DatumGetInt32(SPI_getbinval(tuple, tupdesc, o+offset, &info));
               // calculate distances
@@ -889,7 +949,6 @@ ivpq_search_in(PG_FUNCTION_ARGS)
           // calculate distances with target list
             for (i = 0; i < queryVectorsIndicesSize; i++){
               int queryVectorsIndex = queryVectorsIndices[i];
-              // TODO may prefetch querySimilarities in cache
               TargetListElem* current = &targetLists[queryVectorsIndex];
               while(current != NULL){
                 for (int j = 0; j < current->size;j++){
@@ -978,8 +1037,12 @@ ivpq_search_in(PG_FUNCTION_ARGS)
           queryVectorsIndicesSize = 0;
         }
         max_coarse_order += se;
-        if (max_coarse_order > cqSize){
-          max_coarse_order = cqSize;
+        if (singleColumnMode && (!USE_STATISTICS)){
+          if (max_coarse_order > cqSize){
+            max_coarse_order = cqSize;
+          }
+        }else{
+          se += se;
         }
 
         elog(INFO, "max_coarse_order: %d", max_coarse_order);

@@ -97,6 +97,10 @@ int cmpTopKPVEntry (const void * a, const void * b) {
    return ( (((float)(*(TopKPVEntry*)a).distance) > ((float)(*(TopKPVEntry*)b).distance )) - ((float)((*(TopKPVEntry*)a).distance) < ((float)(*(TopKPVEntry*)b).distance)));
 }
 
+int cmpTopKEntry (const void * a, const void * b) {
+   return ( (((float)(*(TopKEntry*)a).distance) > ((float)(*(TopKEntry*)b).distance )) - ((float)((*(TopKEntry*)a).distance) < ((float)(*(TopKEntry*)b).distance)));
+}
+
 bool inBlacklist(int id, Blacklist* bl){
   if (bl->isValid){
     if (bl->id == id){
@@ -163,6 +167,131 @@ void determineCoarseIds(int** pCqIds, int*** pCqTableIds, int** pCqTableIdCounts
   }
 
 }
+
+void determineCoarseIdsMulti(int*** pCqIds, int*** pCqTableIds, int** pCqTableIdCounts,
+                        int* queryVectorsIndices, int queryVectorsIndicesSize, int queryVectorsSize,
+                        float maxDist, CoarseQuantizer cq, int cqSize,
+                        float4** queryVectors, int queryDim, const int max_coarse_order){
+  int** cqIds;
+  int** cqTableIds;
+  int* cqTableIdCounts;
+  TopK minDist;
+  float dist;
+
+  minDist = palloc(sizeof(TopKEntry)*cqSize);
+
+  *pCqIds = palloc(queryVectorsSize*sizeof(int*));
+  cqIds = *pCqIds;
+  for (int i = 0; i < queryVectorsSize; i++){
+    cqIds[i] = palloc(sizeof(int)*max_coarse_order);
+  }
+
+  *pCqTableIds = palloc(sizeof(int*)*cqSize);
+  cqTableIds = *pCqTableIds;
+
+  *pCqTableIdCounts = palloc(sizeof(int)*cqSize);
+  cqTableIdCounts = *pCqTableIdCounts;
+
+  for (int i = 0; i < cqSize; i++){
+    cqTableIds[i] = NULL;
+    cqTableIdCounts[i] = 0;
+  }
+
+  for (int x = 0; x < queryVectorsIndicesSize; x++){
+    int queryIndex = queryVectorsIndices[x];
+
+    for (int i = 0; i < max_coarse_order; i++){
+      minDist[i].id = -1;
+      minDist[i].distance = maxDist;
+    }
+
+    for (int j=0; j < cqSize; j++){
+      dist = squareDistance(queryVectors[queryIndex], cq[j].vector, queryDim);
+      if (dist < minDist[max_coarse_order-1].distance){
+        minDist[max_coarse_order-1].id = j;
+        minDist[max_coarse_order-1].distance = dist;
+        qsort(minDist, max_coarse_order, sizeof(TopKEntry), cmpTopKEntry);
+      }
+    }
+    for (int i = 0; i < max_coarse_order; i++){
+      int cqId = minDist[i].id;
+      cqIds[queryIndex][i] = cqId;
+
+      if (cqTableIdCounts[cqId] == 0){
+          cqTableIds[cqId] = palloc(sizeof(int)*queryVectorsIndicesSize);
+      }
+      cqTableIds[cqId][cqTableIdCounts[cqId]] = queryIndex;
+      cqTableIdCounts[cqId] += 1;
+    }
+  }
+
+}
+
+void determineCoarseIdsMultiWithStatistics(int*** pCqIds, int*** pCqTableIds, int** pCqTableIdCounts,
+                        int* queryVectorsIndices, int queryVectorsIndicesSize, int queryVectorsSize,
+                        float maxDist, CoarseQuantizer cq, int cqSize,
+                        float4** queryVectors, int queryDim, float* statistics, int inputIdsSize, const int minTargetCount, const float confidence){
+  int** cqIds;
+  int** cqTableIds;
+  int* cqTableIdCounts;
+  TopK minDist;
+  float dist;
+  float targetCount;
+
+  minDist = palloc(sizeof(TopKEntry)*cqSize);
+
+  *pCqIds = palloc(queryVectorsSize*sizeof(int*));
+  cqIds = *pCqIds;
+
+  *pCqTableIds = palloc(sizeof(int*)*cqSize);
+  cqTableIds = *pCqTableIds;
+
+  *pCqTableIdCounts = palloc(sizeof(int)*cqSize);
+  cqTableIdCounts = *pCqTableIdCounts;
+
+  for (int i = 0; i < cqSize; i++){
+    cqTableIds[i] = NULL;
+    cqTableIdCounts[i] = 0;
+  }
+
+  for (int x = 0; x < queryVectorsIndicesSize; x++){
+    int queryIndex = queryVectorsIndices[x];
+    int max_coarse_order = 0;
+    for (int i = 0; i < cqSize; i++){
+      minDist[i].id = -1;
+      minDist[i].distance = maxDist;
+    }
+
+    for (int j=0; j < cqSize; j++){
+      dist = squareDistance(queryVectors[queryIndex], cq[j].vector, queryDim);
+      minDist[j].id = j;
+      minDist[j].distance = dist;
+    }
+    qsort(minDist, cqSize, sizeof(TopKEntry), cmpTopKEntry);
+    targetCount = 0;
+    float prob = 0.0;
+    while ((getConfidenceHyp(minTargetCount, inputIdsSize, prob, statistics[cqSize]) < confidence) && (max_coarse_order < cqSize)){
+      targetCount += statistics[minDist[max_coarse_order].id]*inputIdsSize;
+      prob += statistics[minDist[max_coarse_order].id];
+      max_coarse_order++;
+    }
+    elog(INFO, "TRACK target_count %f", targetCount);
+    cqIds[queryIndex] = palloc(sizeof(int)*max_coarse_order);
+    for (int i = 0; i<max_coarse_order; i++){
+      int cqId = minDist[i].id;
+      cqIds[queryIndex][i] = cqId;
+
+      if (cqTableIdCounts[cqId] == 0){
+          cqTableIds[cqId] = palloc(sizeof(int)*queryVectorsIndicesSize);
+      }
+      cqTableIds[cqId][cqTableIdCounts[cqId]] = queryIndex;
+      cqTableIdCounts[cqId] += 1;
+    }
+  }
+
+}
+
+
 
 void postverify(int* queryVectorsIndices, int queryVectorsIndicesSize,
                 int k, int pvf, TopKPV* topKPVs, TopK* topKs, float4** queryVectors,
@@ -321,6 +450,55 @@ Codebook getCodebook(int* positions, int* codesize, char* tableName){
   return result;
 }
 
+float* getStatistics(){
+  float* result;
+  char command[100];
+  int ret;
+  int proc;
+  char* tableName = palloc(sizeof(char)*100);
+
+  getTableName(STATISTICS, tableName, 100);
+
+  SPI_connect();
+  sprintf(command, "SELECT coarse_id, coarse_freq FROM %s", tableName);
+
+  ret = SPI_exec(command, 0);
+  proc = SPI_processed;
+
+  result = SPI_palloc(proc * sizeof(float));
+
+  if (ret > 0 && SPI_tuptable != NULL){
+    TupleDesc tupdesc = SPI_tuptable->tupdesc;
+    SPITupleTable *tuptable = SPI_tuptable;
+    int i;
+    for (i = 0; i < proc; i++){
+
+      bool info;
+      HeapTuple tuple = tuptable->vals[i];
+
+      int coarse_id = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &info));
+      result[coarse_id] = DatumGetFloat4(SPI_getbinval(tuple, tupdesc, 2, &info));
+
+    }
+  }
+
+  SPI_finish();
+
+  return result;
+}
+
+float getConfidenceBin(int expect, int size, float p){
+  float mu = size * p;
+  float sig = sqrt(size*p*(1.0-p));
+  return 1.0 - 0.5*(1 + erf((expect-0.5 - mu)/sig));
+}
+
+float getConfidenceHyp(int expect, int size, float p, int stat_size){
+  float mu = size * p;
+  float sig = sqrt(size*p*(1.0-p)) * ( ((float) stat_size - size) /((float) stat_size - 1.0) );
+  return 1.0 - 0.5*(1 + erf((expect-0.5 - mu)/sig));
+}
+
 CodebookWithCounts getCodebookWithCounts(int* positions, int* codesize, char* tableName){
   char command[50];
   int ret;
@@ -463,7 +641,8 @@ void getTableName(tableType type, char* name, int bufferSize){
     "get_vecs_name_residual_quantization()",
     "get_vecs_name_coarse_quantization()",
     "get_vecs_name_residual_codebook()",
-    "get_vecs_name_ivpq_quantization()"
+    "get_vecs_name_ivpq_quantization()",
+    "get_statistics_table()"
   };
 
   SPI_connect();

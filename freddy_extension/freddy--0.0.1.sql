@@ -51,6 +51,21 @@ END
 $$
 LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION  set_confidence_value(confidence float4) RETURNS void AS $$
+BEGIN
+EXECUTE format('CREATE OR REPLACE FUNCTION get_confidence_value() RETURNS float4 AS ''SELECT ''''%s''''::float4'' LANGUAGE sql IMMUTABLE', confidence);
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION set_statistics_table(table_name regclass) RETURNS void AS $$
+BEGIN
+EXECUTE format('CREATE OR REPLACE FUNCTION get_statistics_table() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', table_name);
+END
+$$
+LANGUAGE plpgsql;
+
+
 CREATE OR REPLACE FUNCTION set_knn_function(name varchar) RETURNS void AS $$
 BEGIN
 EXECUTE format('CREATE OR REPLACE FUNCTION get_knn_function_name() RETURNS varchar AS ''SELECT varchar ''''%s'''''' LANGUAGE sql IMMUTABLE', name);
@@ -117,7 +132,30 @@ SELECT set_analogy_function('analogy_3cosadd');
 SELECT set_analogy_in_function('analogy_3cosadd_in');
 SELECT set_groups_function('grouping_func');
 
-
+CREATE OR REPLACE FUNCTION create_statistics(table_name varchar, column_name varchar)  RETURNS void AS $$
+DECLARE
+coarse_table_name varchar;
+ivpq_quantization varchar;
+number_of_coarse_ids int;
+stats_table_name varchar;
+vec_table_name varchar;
+total_amount float;
+BEGIN
+stats_table_name = format('stat_%s_%s', table_name, column_name);
+EXECUTE 'SELECT get_vecs_name_coarse_quantization()' INTO coarse_table_name;
+EXECUTE 'SELECT get_vecs_name_ivpq_quantization()' INTO ivpq_quantization;
+EXECUTE 'SELECT get_vecs_name()' INTO vec_table_name;
+EXECUTE format('DROP TABLE IF EXISTS %s', stats_table_name);
+EXECUTE format('CREATE TABLE %s (coarse_id int, coarse_freq float4)', stats_table_name);
+EXECUTE format('SELECT count(*) FROM %s', coarse_table_name) INTO number_of_coarse_ids;
+EXECUTE format('SELECT count(*) FROM %s AS t INNER JOIN %s AS v ON t.%s = v.word', table_name, vec_table_name, column_name) INTO total_amount;
+FOR I IN 0 .. (number_of_coarse_ids-1) LOOP
+  EXECUTE format('INSERT INTO %s (coarse_id, coarse_freq) VALUES (%s, (SELECT count(*) FROM %s AS iv INNER JOIN %s AS vtm ON iv.id = vtm.id INNER JOIN %s AS tn ON tn.%s = vtm.word WHERE coarse_id_0 = %s)::float / %s)', stats_table_name,I, ivpq_quantization, vec_table_name, table_name, column_name, I, total_amount);
+END LOOP;
+  EXECUTE format('INSERT INTO %s (coarse_id, coarse_freq) VALUES (%s, (SELECT count(*) FROM %s AS tn INNER JOIN %s AS vtn ON tn.%s = vtn.word))', stats_table_name, number_of_coarse_ids, table_name, vec_table_name, column_name);
+END
+$$
+LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION knn(query varchar(100), k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
@@ -261,7 +299,7 @@ CREATE OR REPLACE FUNCTION pq_search_in(bytea, integer, integer[]) RETURNS SETOF
 AS '$libdir/freddy', 'pq_search_in'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE OR REPLACE FUNCTION ivpq_search_in(bytea[], integer[], integer, integer[], integer, integer, integer, boolean) RETURNS SETOF record
+CREATE OR REPLACE FUNCTION ivpq_search_in(bytea[], integer[], integer, integer[], integer, integer, integer, boolean, float4) RETURNS SETOF record
 AS '$libdir/freddy', 'ivpq_search_in'
 LANGUAGE C IMMUTABLE STRICT;
 
@@ -562,6 +600,7 @@ post_verif integer;
 se integer;
 method_flag integer;
 use_targetlist boolean;
+confidence float4;
 formated varchar[];
 formated_queries varchar[];
 ids integer[];
@@ -574,6 +613,7 @@ EXECUTE 'SELECT get_pvf()' INTO post_verif;
 EXECUTE 'SELECT get_se()' INTO se;
 EXECUTE 'SELECT get_method_flag()' INTO method_flag;
 EXECUTE 'SELECT get_use_targetlist()' INTO use_targetlist;
+EXECUTE 'SELECT get_confidence_value()' INTO confidence;
 FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
   formated[I] = replace(input_set[I], '''', '''''');
 END LOOP;
@@ -589,8 +629,8 @@ FOR rec IN EXECUTE format('SELECT word, vector, id FROM %s WHERE word = ANY(''%s
 END LOOP;
 RETURN QUERY EXECUTE format('
 SELECT f.word, g.word, (1.0 - (distance / 2.0))::float4 as similarity
-FROM %s(''%s''::bytea[], ''%s''::integer[], ''%s''::int, ARRAY(SELECT id FROM %s WHERE word = ANY(''%s''::varchar(100)[])), %s, %s, %s, ''%s'') AS (qid integer, tid integer, distance float4) INNER JOIN %s AS f ON qid = f.id INNER JOIN %s AS g ON tid = g.id;
-', function_name, vectors, ids, k, table_name, formated, se, post_verif, method_flag, use_targetlist, table_name, table_name);
+FROM %s(''%s''::bytea[], ''%s''::integer[], ''%s''::int, ARRAY(SELECT id FROM %s WHERE word = ANY(''%s''::varchar(100)[])), %s, %s, %s, ''%s'', %s) AS (qid integer, tid integer, distance float4) INNER JOIN %s AS f ON qid = f.id INNER JOIN %s AS g ON tid = g.id;
+', function_name, vectors, ids, k, table_name, formated, se, post_verif, method_flag, use_targetlist, confidence, table_name, table_name);
 END
 $$
 LANGUAGE plpgsql;

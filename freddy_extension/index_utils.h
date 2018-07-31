@@ -64,7 +64,7 @@ typedef struct TargetListElem{
 
 typedef TargetListElem* TargetLists;
 
-typedef enum {ORIGINAL, NORMALIZED, PQ_QUANTIZATION, CODEBOOK, RESIDUAL_QUANTIZATION, COARSE_QUANTIZATION, RESIDUAL_CODBOOK, IVPQ_QUANTIZATION} tableType;
+typedef enum {ORIGINAL, NORMALIZED, PQ_QUANTIZATION, CODEBOOK, RESIDUAL_QUANTIZATION, COARSE_QUANTIZATION, RESIDUAL_CODBOOK, IVPQ_QUANTIZATION, STATISTICS} tableType;
 
 typedef enum {PARAM_PVF, PARAM_W} parameterType;
 
@@ -92,17 +92,29 @@ void initTopKPVs(TopKPV** pTopKs, float** pMaxDists, int queryVectorsSize, int k
 
 int cmpTopKPVEntry (const void * a, const void * b);
 
+int cmpTopKEntry (const void * a, const void * b);
+
 bool inBlacklist(int id, Blacklist* bl);
 
 void addToBlacklist(int id, Blacklist* bl, Blacklist* emptyBl);
 
 void determineCoarseIds(int** pCqIds, int*** pCqTableIds, int** pCqTableIdCounts, int* queryVectorsIndices, int queryVectorsIndicesSize, int queryVectorsSize, float maxDist, CoarseQuantizer cq, int cqSize, float4** queryVectors, int queryDim);
 
+void determineCoarseIdsMulti(int*** pCqIds, int*** pCqTableIds, int** pCqTableIdCounts, int* queryVectorsIndices, int queryVectorsIndicesSize, int queryVectorsSize, float maxDist, CoarseQuantizer cq, int cqSize, float4** queryVectors, int queryDim, const int max_coarse_order);
+
+void determineCoarseIdsMultiWithStatistics(int*** pCqIds, int*** pCqTableIds, int** pCqTableIdCounts, int* queryVectorsIndices, int queryVectorsIndicesSize, int queryVectorsSize, float maxDist, CoarseQuantizer cq, int cqSize, float4** queryVectors, int queryDim, float* statistics, int inputIdsSize, const int minTargetCount, const float confidence);
+
 void postverify(int* queryVectorsIndices, int queryVectorsIndicesSize, int k, int pvf, TopKPV* topKPVs, TopK* topKs, float4** queryVectors, int queryDim, const float maxDistance);
 
 float squareDistance(float* v1, float* v2, int n);
 
 void shuffle(int* input, int* output, int inputSize, int outputSize);
+
+float getConfidenceBin(int expect, int size, float p);
+
+float getConfidenceHyp(int expect, int size, float p, int stat_size);
+
+float* getStatistics();
 
 CoarseQuantizer getCoarseQuantizer(int* size);
 

@@ -193,6 +193,11 @@ def main(argc, argv):
         utils.create_index(index_config.get_value('fine_table_name'),
             index_config.get_value('fine_coarse_index_name')+'_'+str(i),
             'coarse_id_' + str(i), con, cur, logger)
+
+    # create statistics
+    if (index_config.has_key('statistic_table') and index_config.has_key('statistic_column')):
+        utils.create_statistics_table(vec_config.get_value('statistic_table'), vec_config.get_value('statistic_column'), con, cur, logger)
+
     utils.enable_triggers(index_config.get_value('fine_table_name'), con, cur)
 
 
