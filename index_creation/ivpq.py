@@ -14,19 +14,19 @@ USE_BYTEA_TYPE = True
 
 def get_table_information(index_config):
     num_centr = index_config.get_value('k_coarse')
-    centr_columns = ', '.join(['coarse_id_' + str(i) + ' integer' for i in range(num_centr)])
+    # centr_columns = ', '.join(['coarse_id_' + str(i) + ' integer' for i in range(num_centr)])
     if USE_BYTEA_TYPE:
         return ((index_config.get_value('coarse_table_name'),
             "(id serial PRIMARY KEY, vector bytea, count int)"),
             (index_config.get_value('fine_table_name'),
-            "(id serial PRIMARY KEY, " + centr_columns + ", word_id integer, vector bytea)"),
+            "(id serial PRIMARY KEY, coarse_id integer, word_id integer, vector bytea)"),
             (index_config.get_value('cb_table_name'),
             "(id serial PRIMARY KEY, pos int, code int, vector bytea, count int)"))
     else:
         return ((index_config.get_value('coarse_table_name'),
             "(id serial PRIMARY KEY, vector float4[], count int)"),
             (index_config.get_value('fine_table_name'),
-            "(id serial PRIMARY KEY, " + centr_columns + ", word_id integer, vector int[])"),
+            "(id serial PRIMARY KEY, coarse_id integer, word_id integer, vector int[])"),
             (index_config.get_value('cb_table_name'),
             "(id serial PRIMARY KEY, pos int, code int, vector float4[], count int)"))
 
@@ -40,28 +40,22 @@ def add_to_database(words, cq, codebook, pq_quantization, coarse_counts, \
 
     # add fine qunatization
     values = []
-    coarse_id_columns = ','.join(['coarse_id_' + str(i) for i in \
-        range(len(pq_quantization[0][0]))])
+    coarse_id_column = 'coarse_id'
     for i in range(len(pq_quantization)):
         output_vec = utils.serialize_vector(pq_quantization[i][1])
         # print('pq_quantization[i]', pq_quantization[i])
-        value_entry = {"word_id": i+1, "vector": output_vec}
-        for j,elem in enumerate(pq_quantization[i][0]):
-             value_entry["coarse_id_" + str(j)] = str(elem)
+        value_entry = {"word_id": i+1, "vector": output_vec, "coarse_id": str(pq_quantization[i][0])}
         values.append(value_entry)
         if (i % (batch_size-1) == 0) or (i == (len(pq_quantization)-1)):
             if USE_BYTEA_TYPE:
                 query = "INSERT INTO "+ index_config.get_value('fine_table_name') + \
-                    " (" + coarse_id_columns + ", word_id,vector) VALUES (" + \
-                    ', '.join(['%(coarse_id_' + str(x) + ')s' \
-                    for x in range(len(pq_quantization[0][0]))]) + \
-                    ", %(word_id)s, vec_to_bytea(%(vector)s::int2[]))"
+                    " (" + coarse_id_column + ", word_id,vector) VALUES (" + \
+                    '%(coarse_id)s' + ", %(word_id)s, vec_to_bytea(%(vector)s::int2[]))"
                 cur.executemany(query, tuple(values))
             else:
                 query = "INSERT INTO "+ index_config.get_value('fine_table_name') + \
-                    " (" + coarse_id_columns + ", word_id,vector) VALUES (" + \
-                    ', '.join(['%(coarse_id_' + str(x) + ')s' for x in \
-                    range(len(pq_quantization[0][0]))]) + ", %(word_id)s, %(vector)s)"
+                    " (" + coarse_id_column + ", word_id,vector) VALUES ("+ \
+                    '%(coarse_id)s' + ", %(word_id)s, %(vector)s)"
                 cur.executemany(query, tuple(values))
             con.commit()
             logger.log(Logger.INFO, 'Inserted ' +  str(i+1) + ' vectors')
@@ -92,8 +86,8 @@ def create_index_data(vectors, cq, codebook, logger):
     for c in range(len(vectors)):
         count += 1
         vec = vectors[c]
-        _, I = coarse.search(np.array([vec]), len(cq))
-        coarse_ids.append(I[0])
+        _, I = coarse.search(np.array([vec]), 1)
+        coarse_ids.append(I[0][0])
 
         # update coarse counts
         if I[0][0] in coarse_counts:
@@ -189,14 +183,13 @@ def main(argc, argv):
     logger.log(logger.INFO, 'Create database index structures')
     utils.create_index(index_config.get_value('fine_table_name'),
         index_config.get_value('fine_word_index_name'), 'word_id', con, cur, logger)
-    for i in range(len(cq)):
-        utils.create_index(index_config.get_value('fine_table_name'),
-            index_config.get_value('fine_coarse_index_name')+'_'+str(i),
-            'coarse_id_' + str(i), con, cur, logger)
+    utils.create_index(index_config.get_value('fine_table_name'),
+        index_config.get_value('fine_coarse_index_name'),
+        'coarse_id', con, cur, logger)
 
     # create statistics
     if (index_config.has_key('statistic_table') and index_config.has_key('statistic_column')):
-        utils.create_statistics_table(vec_config.get_value('statistic_table'), vec_config.get_value('statistic_column'), con, cur, logger)
+        utils.create_statistics_table(index_config.get_value('statistic_table'), index_config.get_value('statistic_column'), con, cur, logger)
 
     utils.enable_triggers(index_config.get_value('fine_table_name'), con, cur)
 

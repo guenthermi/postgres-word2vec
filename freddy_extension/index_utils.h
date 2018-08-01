@@ -98,11 +98,7 @@ bool inBlacklist(int id, Blacklist* bl);
 
 void addToBlacklist(int id, Blacklist* bl, Blacklist* emptyBl);
 
-void determineCoarseIds(int** pCqIds, int*** pCqTableIds, int** pCqTableIdCounts, int* queryVectorsIndices, int queryVectorsIndicesSize, int queryVectorsSize, float maxDist, CoarseQuantizer cq, int cqSize, float4** queryVectors, int queryDim);
-
-void determineCoarseIdsMulti(int*** pCqIds, int*** pCqTableIds, int** pCqTableIdCounts, int* queryVectorsIndices, int queryVectorsIndicesSize, int queryVectorsSize, float maxDist, CoarseQuantizer cq, int cqSize, float4** queryVectors, int queryDim, const int max_coarse_order);
-
-void determineCoarseIdsMultiWithStatistics(int*** pCqIds, int*** pCqTableIds, int** pCqTableIdCounts, int* queryVectorsIndices, int queryVectorsIndicesSize, int queryVectorsSize, float maxDist, CoarseQuantizer cq, int cqSize, float4** queryVectors, int queryDim, float* statistics, int inputIdsSize, const int minTargetCount, const float confidence);
+bool determineCoarseIdsMultiWithStatistics(int*** pCqIds, int*** pCqTableIds, int** pCqTableIdCounts, int* queryVectorsIndices, int queryVectorsIndicesSize, int queryVectorsSize, float maxDist, CoarseQuantizer cq, int cqSize, float4** queryVectors, int queryDim, float* statistics, int inputIdsSize, const int minTargetCount, const float confidence);
 
 void postverify(int* queryVectorsIndices, int queryVectorsIndicesSize, int k, int pvf, TopKPV* topKPVs, TopK* topKs, float4** queryVectors, int queryDim, const float maxDistance);
 

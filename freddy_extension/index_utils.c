@@ -122,112 +122,7 @@ void addToBlacklist(int id, Blacklist* bl, Blacklist* emptyBl){
   bl->isValid = true;
 }
 
-void determineCoarseIds(int** pCqIds, int*** pCqTableIds, int** pCqTableIdCounts,
-                        int* queryVectorsIndices, int queryVectorsIndicesSize, int queryVectorsSize,
-                        float maxDist, CoarseQuantizer cq, int cqSize,
-                        float4** queryVectors, int queryDim){
-  int* cqIds;
-  int** cqTableIds;
-  int* cqTableIdCounts;
-  float minDist;
-  float dist;
-
-  *pCqIds = palloc(queryVectorsSize*sizeof(int));
-  cqIds = *pCqIds;
-
-  *pCqTableIds = palloc(sizeof(int*)*cqSize);
-  cqTableIds = *pCqTableIds;
-
-  *pCqTableIdCounts = palloc(sizeof(int)*cqSize);
-  cqTableIdCounts = *pCqTableIdCounts;
-
-  for (int i = 0; i < cqSize; i++){
-    cqTableIds[i] = NULL;
-    cqTableIdCounts[i] = 0;
-  }
-
-  for (int x = 0; x < queryVectorsIndicesSize; x++){
-    int queryIndex = queryVectorsIndices[x];
-    int cqId = -1;
-    minDist = maxDist;
-
-    for (int j=0; j < cqSize; j++){
-      dist = squareDistance(queryVectors[queryIndex], cq[j].vector, queryDim);
-      if (dist < minDist){
-        cqId = j;
-        cqIds[queryIndex] = cqId;
-        minDist = dist;
-      }
-    }
-    if (cqTableIdCounts[cqId] == 0){
-        cqTableIds[cqId] = palloc(sizeof(int)*queryVectorsIndicesSize);
-    }
-    cqTableIds[cqId][cqTableIdCounts[cqId]] = queryIndex;
-    cqTableIdCounts[cqId] += 1;
-  }
-
-}
-
-void determineCoarseIdsMulti(int*** pCqIds, int*** pCqTableIds, int** pCqTableIdCounts,
-                        int* queryVectorsIndices, int queryVectorsIndicesSize, int queryVectorsSize,
-                        float maxDist, CoarseQuantizer cq, int cqSize,
-                        float4** queryVectors, int queryDim, const int max_coarse_order){
-  int** cqIds;
-  int** cqTableIds;
-  int* cqTableIdCounts;
-  TopK minDist;
-  float dist;
-
-  minDist = palloc(sizeof(TopKEntry)*cqSize);
-
-  *pCqIds = palloc(queryVectorsSize*sizeof(int*));
-  cqIds = *pCqIds;
-  for (int i = 0; i < queryVectorsSize; i++){
-    cqIds[i] = palloc(sizeof(int)*max_coarse_order);
-  }
-
-  *pCqTableIds = palloc(sizeof(int*)*cqSize);
-  cqTableIds = *pCqTableIds;
-
-  *pCqTableIdCounts = palloc(sizeof(int)*cqSize);
-  cqTableIdCounts = *pCqTableIdCounts;
-
-  for (int i = 0; i < cqSize; i++){
-    cqTableIds[i] = NULL;
-    cqTableIdCounts[i] = 0;
-  }
-
-  for (int x = 0; x < queryVectorsIndicesSize; x++){
-    int queryIndex = queryVectorsIndices[x];
-
-    for (int i = 0; i < max_coarse_order; i++){
-      minDist[i].id = -1;
-      minDist[i].distance = maxDist;
-    }
-
-    for (int j=0; j < cqSize; j++){
-      dist = squareDistance(queryVectors[queryIndex], cq[j].vector, queryDim);
-      if (dist < minDist[max_coarse_order-1].distance){
-        minDist[max_coarse_order-1].id = j;
-        minDist[max_coarse_order-1].distance = dist;
-        qsort(minDist, max_coarse_order, sizeof(TopKEntry), cmpTopKEntry);
-      }
-    }
-    for (int i = 0; i < max_coarse_order; i++){
-      int cqId = minDist[i].id;
-      cqIds[queryIndex][i] = cqId;
-
-      if (cqTableIdCounts[cqId] == 0){
-          cqTableIds[cqId] = palloc(sizeof(int)*queryVectorsIndicesSize);
-      }
-      cqTableIds[cqId][cqTableIdCounts[cqId]] = queryIndex;
-      cqTableIdCounts[cqId] += 1;
-    }
-  }
-
-}
-
-void determineCoarseIdsMultiWithStatistics(int*** pCqIds, int*** pCqTableIds, int** pCqTableIdCounts,
+bool determineCoarseIdsMultiWithStatistics(int*** pCqIds, int*** pCqTableIds, int** pCqTableIdCounts,
                         int* queryVectorsIndices, int queryVectorsIndicesSize, int queryVectorsSize,
                         float maxDist, CoarseQuantizer cq, int cqSize,
                         float4** queryVectors, int queryDim, float* statistics, int inputIdsSize, const int minTargetCount, const float confidence){
@@ -237,6 +132,7 @@ void determineCoarseIdsMultiWithStatistics(int*** pCqIds, int*** pCqTableIds, in
   TopK minDist;
   float dist;
   float targetCount;
+  bool lastIteration = true;
 
   minDist = palloc(sizeof(TopKEntry)*cqSize);
 
@@ -275,7 +171,10 @@ void determineCoarseIdsMultiWithStatistics(int*** pCqIds, int*** pCqTableIds, in
       prob += statistics[minDist[max_coarse_order].id];
       max_coarse_order++;
     }
-    elog(INFO, "TRACK target_count %f", targetCount);
+    if (max_coarse_order < cqSize){
+      lastIteration = false;
+    }
+    //elog(INFO, "TRACK target_count %f", targetCount); // to get statistics about the quality of the prediction
     cqIds[queryIndex] = palloc(sizeof(int)*max_coarse_order);
     for (int i = 0; i<max_coarse_order; i++){
       int cqId = minDist[i].id;
@@ -288,6 +187,8 @@ void determineCoarseIdsMultiWithStatistics(int*** pCqIds, int*** pCqTableIds, in
       cqTableIdCounts[cqId] += 1;
     }
   }
+
+  return lastIteration;
 
 }
 
