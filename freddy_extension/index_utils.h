@@ -20,6 +20,17 @@ typedef struct TopKPVEntry{
   float4* vector;
 }TopKPVEntry;
 
+typedef struct QueueEntry{
+  int id;
+  float distance;
+  int positions[2];
+}QueueEntry;
+
+typedef struct DistancePQueue{
+  QueueEntry* nodes;
+  int len;
+}DistancePQueue;
+
 typedef TopKEntry* TopK;
 typedef TopKPVEntry* TopKPV;
 
@@ -90,6 +101,10 @@ void initTopKPV(TopKPV* pTopK, int k, const float maxDist, int dim);
 
 void initTopKPVs(TopKPV** pTopKs, float** pMaxDists, int queryVectorsSize, int k, const float maxDist, int dim);
 
+QueueEntry pop(DistancePQueue* queue);
+
+void push(DistancePQueue* queue, float distance, int id, int positions[2]);
+
 int cmpTopKPVEntry (const void * a, const void * b);
 
 int cmpTopKEntry (const void * a, const void * b);
@@ -99,6 +114,11 @@ bool inBlacklist(int id, Blacklist* bl);
 void addToBlacklist(int id, Blacklist* bl, Blacklist* emptyBl);
 
 bool determineCoarseIdsMultiWithStatistics(int*** pCqIds, int*** pCqTableIds, int** pCqTableIdCounts, int* queryVectorsIndices, int queryVectorsIndicesSize, int queryVectorsSize, float maxDist, CoarseQuantizer cq, int cqSize, float4** queryVectors, int queryDim, float* statistics, int inputIdsSize, const int minTargetCount, const float confidence);
+
+bool determineCoarseIdsMultiWithStatisticsMulti(int*** pCqIds, int*** pCqTableIds, int** pCqTableIdCounts,
+                        int* queryVectorsIndices, int queryVectorsIndicesSize, int queryVectorsSize,
+                        float maxDist, Codebook cq, int cqSize, int cqPositions, int cqCodes,
+                        float4** queryVectors, int queryDim, float* statistics, int inputIdsSize, const int minTargetCount, float confidence);
 
 void postverify(int* queryVectorsIndices, int queryVectorsIndicesSize, int k, int pvf, TopKPV* topKPVs, TopK* topKs, float4** queryVectors, int queryDim, const float maxDistance);
 
@@ -110,7 +130,7 @@ float getConfidenceBin(int expect, int size, float p);
 
 float getConfidenceHyp(int expect, int size, float p, int stat_size);
 
-float* getStatistics();
+float* getStatistics(void);
 
 CoarseQuantizer getCoarseQuantizer(int* size);
 

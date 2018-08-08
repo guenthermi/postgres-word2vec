@@ -36,13 +36,11 @@ void updateTopKPV(TopKPV tk, float distance, int id, int k, int maxDist, float4*
   for (int j = k-2; j >= i; j--){
     tk[j+1].distance = tk[j].distance;
     tk[j+1].id = tk[j].id;
-    // memcpy(tk[j+1].vector, tk[j].vector, dim*sizeof(float4));
     tk[j+1].vector = tk[j].vector;
   }
   tk[i].distance = distance;
   tk[i].id = id;
   tk[i].vector = vector;
-  // memcpy(tk[i].vector, vector, dim*sizeof(float4));
 }
 
 void updateTopKWordEntry(char** term, char* word){
@@ -101,6 +99,43 @@ int cmpTopKEntry (const void * a, const void * b) {
    return ( (((float)(*(TopKEntry*)a).distance) > ((float)(*(TopKEntry*)b).distance )) - ((float)((*(TopKEntry*)a).distance) < ((float)(*(TopKEntry*)b).distance)));
 }
 
+void push(DistancePQueue* queue, float distance, int id, int positions[2]){
+    int i = queue->len;
+    int j = (i-1) / 2;
+    while ((i > 0) && (queue->nodes[j].distance > distance)) {
+        queue->nodes[i] = queue->nodes[j];
+        i = j;
+        j = (j-1) / 2;
+    }
+    queue->nodes[i].distance = distance;
+    queue->nodes[i].id = id;
+    queue->nodes[i].positions[0] = positions[0];
+    queue->nodes[i].positions[1] = positions[1];
+    queue->len++;
+}
+
+QueueEntry pop(DistancePQueue* queue){
+  QueueEntry result = queue->nodes[0];
+  int j;
+  int last;
+  int i = 0;
+  queue->nodes[0] = queue->nodes[queue->len-1];
+  queue->len--;
+  while (i != queue->len){
+    last = queue->len;
+    j = 1 + (i*2);
+    if ((j <= (queue->len-1)) && (queue->nodes[j].distance < queue->nodes[last].distance)){
+      last = j;
+    }
+    if ((j <= (queue->len-1)) && (queue->nodes[j+1].distance < queue->nodes[last].distance)){
+      last = j+1;
+    }
+    queue->nodes[i] = queue->nodes[last];
+    i = last;
+  }
+  return result;
+}
+
 bool inBlacklist(int id, Blacklist* bl){
   if (bl->isValid){
     if (bl->id == id){
@@ -153,6 +188,7 @@ bool determineCoarseIdsMultiWithStatistics(int*** pCqIds, int*** pCqTableIds, in
   for (int x = 0; x < queryVectorsIndicesSize; x++){
     int queryIndex = queryVectorsIndices[x];
     int max_coarse_order = 0;
+    float prob = 0.0;
     for (int i = 0; i < cqSize; i++){
       minDist[i].id = -1;
       minDist[i].distance = maxDist;
@@ -165,7 +201,6 @@ bool determineCoarseIdsMultiWithStatistics(int*** pCqIds, int*** pCqTableIds, in
     }
     qsort(minDist, cqSize, sizeof(TopKEntry), cmpTopKEntry);
     targetCount = 0;
-    float prob = 0.0;
     while ((getConfidenceHyp(minTargetCount, inputIdsSize, prob, statistics[cqSize]) < confidence) && (max_coarse_order < cqSize)){
       targetCount += statistics[minDist[max_coarse_order].id]*inputIdsSize;
       prob += statistics[minDist[max_coarse_order].id];
@@ -192,7 +227,175 @@ bool determineCoarseIdsMultiWithStatistics(int*** pCqIds, int*** pCqTableIds, in
 
 }
 
+bool determineCoarseIdsMultiWithStatisticsMulti(int*** pCqIds, int*** pCqTableIds, int** pCqTableIdCounts,
+                        int* queryVectorsIndices, int queryVectorsIndicesSize, int queryVectorsSize,
+                        float maxDist, Codebook cq, int cqSize, int cqPositions, int cqCodes,
+                        float4** queryVectors, int queryDim, float* statistics, int inputIdsSize, const int minTargetCount, float confidence){
+  int** cqIds;
+  int** cqTableIds;
+  int* cqTableIdCounts;
+  TopK* minDists;
+  TopK minDistAll;
+  float dist;
+  bool lastIteration = true;
+  int* powers;
+  int subdim = queryDim / cqPositions;
+  const bool USE_PROPERTY_QUEUE = true;
+  int* currentCqIds = palloc(sizeof(int)*cqSize);
+  minDists = palloc(sizeof(TopK)*cqPositions);
+  for (int i = 0; i < cqPositions; i++) {
+      minDists[i] = palloc(sizeof(TopKEntry)*cqCodes);
+  }
+  minDistAll = palloc(sizeof(TopKEntry)*cqSize);
 
+  powers = palloc(sizeof(int)*(cqPositions+1));
+  for (int i = 0; i<cqPositions+1; i++){
+    powers[i] = pow(cqCodes, i);
+  }
+
+
+  *pCqIds = palloc(queryVectorsSize*sizeof(int*));
+  cqIds = *pCqIds;
+
+  *pCqTableIds = palloc(sizeof(int*)*cqSize);
+  cqTableIds = *pCqTableIds;
+
+  *pCqTableIdCounts = palloc(sizeof(int)*cqSize);
+  cqTableIdCounts = *pCqTableIdCounts;
+
+  for (int i = 0; i < cqSize; i++){
+    cqTableIds[i] = NULL;
+    cqTableIdCounts[i] = 0;
+  }
+  for (int x = 0; x < queryVectorsIndicesSize; x++){
+    int queryIndex = queryVectorsIndices[x];
+    int max_coarse_order = 0;
+    float prob = 0.0;
+
+    for (int pos = 0; pos < cqPositions; pos++){
+      for (int j=0; j < cqCodes; j++){
+        dist = squareDistance(queryVectors[queryIndex]+(pos*subdim), cq[j+pos*cqCodes].vector, subdim);
+        minDists[pos][j].id = j;
+        minDists[pos][j].distance = dist;
+      }
+    }
+    for (int i = 0; i < cqSize; i++){
+      minDistAll[i].id = i;
+      minDistAll[i].distance = 0;
+      for (int pos = 0; pos < cqPositions; pos++){
+        minDistAll[i].distance += minDists[pos][i % powers[pos+1] / powers[pos]].distance;
+      }
+    }
+    if (!USE_PROPERTY_QUEUE){
+      qsort(minDistAll,cqSize, sizeof(TopKEntry), cmpTopKEntry);
+    }else{
+      for (int pos=0; pos < cqPositions; pos++){
+        qsort(minDists[pos],cqCodes, sizeof(TopKEntry), cmpTopKEntry);
+      }
+    }
+
+    if (USE_PROPERTY_QUEUE){
+      // ONLY IMPLEMENTED FOR cbPositions == 2!
+
+      // create data structures
+      DistancePQueue queue; // priority queue storing the centroids to be traversed next
+      int elemIndex;
+
+      // bit vector matrix to store information about which centroids are traversed
+      u_int32_t* traversed = palloc(sizeof(uint32_t)*((cqSize/32)+1));
+      u_int32_t* in_queue = palloc(sizeof(uint32_t)*((cqSize/32)+1));
+      for (int i = 0; i < cqSize; i++){
+        traversed[i/32] &= 0 << (i%32);
+      }
+      for (int i = 0; i < cqSize; i++){
+        in_queue[i/32] &= 0 << (i%32);
+      }
+
+      queue.nodes = palloc(sizeof(QueueEntry)*cqSize);
+
+      // init pqueue with element with the lowest distance value
+      elemIndex = powers[0]*minDists[0][0].id+ powers[1]*minDists[1][0].id;
+
+      queue.nodes[0].positions[0] = 0;
+      queue.nodes[0].positions[1] = 0;
+      queue.nodes[0].id = minDistAll[elemIndex].id;
+      queue.nodes[0].distance = minDistAll[elemIndex].distance;
+      queue.len = 1;
+
+      while ((getConfidenceHyp(minTargetCount, inputIdsSize, prob, statistics[cqSize]) < confidence) && (max_coarse_order < cqSize)) {
+        QueueEntry next = pop(&queue);
+        int lastElemIndex;
+        int newPositionIndex = next.positions[0] + cqCodes*next.positions[1];
+        traversed[newPositionIndex/32] |= 1 << (newPositionIndex%32);
+        // add neighbors to priority queue
+        lastElemIndex = next.positions[0] +1 + cqCodes*(next.positions[1]-1);
+        if ((next.positions[0] < (cqCodes-1)) && ((next.positions[1] == 0) || (traversed[lastElemIndex/32] & (1 << (lastElemIndex%32))) )) {
+          int nextPositionIndex;
+          int newPositions[2];
+          newPositions[0] = next.positions[0]+1;
+          newPositions[1] = next.positions[1];
+          nextPositionIndex = newPositions[0] + cqCodes*newPositions[1];
+          if (!(in_queue[nextPositionIndex/32] & (1 << (nextPositionIndex%32)))) {
+            int newId = minDists[0][newPositions[0]].id + cqCodes* minDists[1][newPositions[1]].id;
+            push(&queue, minDistAll[newId].distance, newId, newPositions);
+            in_queue[nextPositionIndex/32] |= 1 << (nextPositionIndex%32);
+          }
+        }
+        lastElemIndex = next.positions[0] -1 + cqCodes*(next.positions[1]+1);
+
+        if ((next.positions[1] < (cqCodes-1)) && ((next.positions[0] == 0) || (traversed[lastElemIndex/32] & (1 << (lastElemIndex%32))) )) {
+          int nextPositionIndex;
+          int newPositions[2];
+          newPositions[0] = next.positions[0];
+          newPositions[1] = next.positions[1]+1;
+          nextPositionIndex = newPositions[0] + cqCodes*newPositions[1];
+          if (!(in_queue[nextPositionIndex/32] & (1 << (nextPositionIndex%32)))) {
+            int newId = minDists[0][newPositions[0]].id + cqCodes* minDists[1][newPositions[1]].id;
+            push(&queue, minDistAll[newId].distance, newId, newPositions);
+            in_queue[nextPositionIndex/32] |= 1 << (nextPositionIndex%32);
+          }
+        }
+        // add centroids and guess number of targets
+        prob += statistics[next.id];
+
+        currentCqIds[max_coarse_order] = next.id;
+        max_coarse_order++;
+        if (cqTableIdCounts[next.id] == 0){
+            cqTableIds[next.id] = palloc(sizeof(int)*queryVectorsIndicesSize);
+        }
+        cqTableIds[next.id][cqTableIdCounts[next.id]] = queryIndex;
+        cqTableIdCounts[next.id] += 1;
+      }
+      if (max_coarse_order < cqSize){
+        lastIteration = false;
+      }
+      cqIds[queryIndex] = palloc(sizeof(int)*max_coarse_order);
+      memcpy(cqIds[queryIndex], currentCqIds, max_coarse_order*sizeof(int));
+    }else{
+      while ((getConfidenceHyp(minTargetCount, inputIdsSize, prob, statistics[cqSize]) < confidence) && (max_coarse_order < (cqSize-1))) {
+        prob += statistics[minDistAll[max_coarse_order].id];
+        max_coarse_order++;
+      }
+      if (max_coarse_order < (cqSize-1)){
+        lastIteration = false;
+      }
+      //elog(INFO, "TRACK target_count %f", targetCount); // to get statistics about the quality of the prediction
+      cqIds[queryIndex] = palloc(sizeof(int)*max_coarse_order);
+      for (int i = 0; i<max_coarse_order; i++){
+        int cqId = minDistAll[i].id;
+        cqIds[queryIndex][i] = cqId;
+
+        if (cqTableIdCounts[cqId] == 0){
+            cqTableIds[cqId] = palloc(sizeof(int)*queryVectorsIndicesSize);
+        }
+        cqTableIds[cqId][cqTableIdCounts[cqId]] = queryIndex;
+        cqTableIdCounts[cqId] += 1;
+      }
+    }
+  }
+  return lastIteration;
+
+}
 
 void postverify(int* queryVectorsIndices, int queryVectorsIndicesSize,
                 int k, int pvf, TopKPV* topKPVs, TopK* topKs, float4** queryVectors,
@@ -308,7 +511,7 @@ Codebook getCodebook(int* positions, int* codesize, char* tableName){
   bytea* vectorData;
 
   SPI_connect();
-  sprintf(command, "SELECT * FROM %s", tableName);
+  sprintf(command, "SELECT * FROM %s ORDER BY pos", tableName);
   ret = SPI_exec(command, 0);
   proc = SPI_processed;
   result = SPI_palloc(proc * sizeof(CodebookEntry));
@@ -395,9 +598,12 @@ float getConfidenceBin(int expect, int size, float p){
 }
 
 float getConfidenceHyp(int expect, int size, float p, int stat_size){
+  if (expect > size){
+    return 0;
+  }
   float mu = size * p;
   float sig = sqrt(size*p*(1.0-p)) * ( ((float) stat_size - size) /((float) stat_size - 1.0) );
-  return 1.0 - 0.5*(1 + erf((expect-0.5 - mu)/sig));
+  return 1.0 - 0.5*(1.0 + erf((expect-0.5 - mu)/sig));
 }
 
 CodebookWithCounts getCodebookWithCounts(int* positions, int* codesize, char* tableName){

@@ -147,7 +147,7 @@ EXECUTE 'SELECT get_vecs_name_ivpq_quantization()' INTO ivpq_quantization;
 EXECUTE 'SELECT get_vecs_name()' INTO vec_table_name;
 EXECUTE format('DROP TABLE IF EXISTS %s', stats_table_name);
 EXECUTE format('CREATE TABLE %s (coarse_id int, coarse_freq float4)', stats_table_name);
-EXECUTE format('SELECT count(*) FROM %s', coarse_table_name) INTO number_of_coarse_ids;
+EXECUTE format('SELECT count(*) FROM %s_counts', coarse_table_name) INTO number_of_coarse_ids;
 EXECUTE format('SELECT count(*) FROM %s AS t INNER JOIN %s AS v ON t.%s = v.word', table_name, vec_table_name, column_name) INTO total_amount;
 FOR I IN 0 .. (number_of_coarse_ids-1) LOOP
   EXECUTE format('INSERT INTO %s (coarse_id, coarse_freq) VALUES (%s, (SELECT count(*) FROM %s AS iv INNER JOIN %s AS vtm ON iv.id = vtm.id INNER JOIN %s AS tn ON tn.%s = vtm.word WHERE coarse_id = %s)::float / %s)', stats_table_name,I, ivpq_quantization, vec_table_name, table_name, column_name, I, total_amount);

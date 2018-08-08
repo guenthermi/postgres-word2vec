@@ -11,24 +11,50 @@ import quantizer_creation as qcreator
 import database_export as db_export
 
 USE_BYTEA_TYPE = True
+COARSE_TYPE = 'MULTI_INDEX'
+
+# converts centroid tupel to id
+combine_centroids = lambda centroids, units: int(sum([elem*units**i for i, elem in enumerate(centroids)]))
 
 def get_table_information(index_config):
     num_centr = index_config.get_value('k_coarse')
     # centr_columns = ', '.join(['coarse_id_' + str(i) + ' integer' for i in range(num_centr)])
+    schemes = []
     if USE_BYTEA_TYPE:
-        return ((index_config.get_value('coarse_table_name'),
-            "(id serial PRIMARY KEY, vector bytea, count int)"),
-            (index_config.get_value('fine_table_name'),
-            "(id serial PRIMARY KEY, coarse_id integer, word_id integer, vector bytea)"),
-            (index_config.get_value('cb_table_name'),
+        # coarse quantizer
+        if COARSE_TYPE == 'MULTI_INDEX':
+            schemes.append((index_config.get_value('coarse_table_name'),
+                "(id serial PRIMARY KEY, pos int, code int, vector bytea)"))
+            schemes.append((index_config.get_value('coarse_table_name') + '_counts',
+                "(id serial PRIMARY KEY, count int)"))
+        else:
+            schemes.append((index_config.get_value('coarse_table_name'),
+                "(id serial PRIMARY KEY, vector bytea, count int)"))
+        # quantization table
+        schemes.append((index_config.get_value('fine_table_name'), "(id serial PRIMARY KEY, coarse_id integer, word_id integer, vector bytea)"))
+        # codebook
+        schemes.append((index_config.get_value('cb_table_name'),
             "(id serial PRIMARY KEY, pos int, code int, vector bytea, count int)"))
+
     else:
-        return ((index_config.get_value('coarse_table_name'),
-            "(id serial PRIMARY KEY, vector float4[], count int)"),
-            (index_config.get_value('fine_table_name'),
-            "(id serial PRIMARY KEY, coarse_id integer, word_id integer, vector int[])"),
-            (index_config.get_value('cb_table_name'),
+        # coarse quantizer
+        if COARSE_TYPE == 'MULTI_INDEX':
+            schemes.append((index_config.get_value('coarse_table_name'),
+                "(id serial PRIMARY KEY, pos int, code int, vector float4[])"))
+            schemes.append((index_config.get_value('coarse_table_name') + '_counts',
+                "(id serial PRIMARY KEY, count int)"))
+        else:
+            schemes.append((index_config.get_value('coarse_table_name'),
+                "(id serial PRIMARY KEY, vector float4[], count int)"))
+
+        # quantization table
+        schemes.append((index_config.get_value('fine_table_name'),
+            "(id serial PRIMARY KEY, coarse_id integer, word_id integer, vector int[])"))
+        # codebook
+        schemes.append((index_config.get_value('cb_table_name'),
             "(id serial PRIMARY KEY, pos int, code int, vector float4[], count int)"))
+
+    return schemes
 
 def add_to_database(words, cq, codebook, pq_quantization, coarse_counts, \
     fine_counts, con, cur, index_config, batch_size, logger):
@@ -36,7 +62,10 @@ def add_to_database(words, cq, codebook, pq_quantization, coarse_counts, \
     db_export.add_codebook_to_database(codebook, fine_counts, con, cur, index_config)
 
     # add coarse quantization
-    db_export.add_cq_to_database(cq, coarse_counts, con, cur, index_config)
+    if COARSE_TYPE == 'MULTI_INDEX':
+        db_export.add_multi_cq_to_database(cq, coarse_counts, con, cur, index_config)
+    else:
+        db_export.add_cq_to_database(cq, coarse_counts, con, cur, index_config)
 
     # add fine qunatization
     values = []
@@ -44,7 +73,12 @@ def add_to_database(words, cq, codebook, pq_quantization, coarse_counts, \
     for i in range(len(pq_quantization)):
         output_vec = utils.serialize_vector(pq_quantization[i][1])
         # print('pq_quantization[i]', pq_quantization[i])
-        value_entry = {"word_id": i+1, "vector": output_vec, "coarse_id": str(pq_quantization[i][0])}
+        coarse_id = None
+        if COARSE_TYPE == 'MULTI_INDEX':
+            coarse_id = str(combine_centroids(pq_quantization[i][0], index_config.get_value('k_coarse')))
+        else:
+            coarse_id = str(pq_quantization[i][0])
+        value_entry = {"word_id": i+1, "vector": output_vec, "coarse_id": coarse_id}
         values.append(value_entry)
         if (i % (batch_size-1) == 0) or (i == (len(pq_quantization)-1)):
             if USE_BYTEA_TYPE:
@@ -70,10 +104,21 @@ def create_index_data(vectors, cq, codebook, logger):
     fine_counts = dict()
     m = len(codebook)
     len_centr = int(len(vectors[0]) / m)
+    coarse = None # coarse quantizer
+    coarse_params = dict()
 
     # create faiss index for coarse quantizer
-    coarse = faiss.IndexFlatL2(len(vectors[0]))
-    coarse.add(cq)
+    if COARSE_TYPE == 'MULTI_INDEX':
+        coarse = []
+        coarse_params['m'] = len(cq)
+        coarse_params['len_centr'] = int(len(vectors[0]) / coarse_params['m'])
+        for i in range(coarse_params['m']):
+            index = faiss.IndexFlatL2(coarse_params['len_centr'])
+            index.add(cq[i])
+            coarse.append(index)
+    else:
+        coarse = faiss.IndexFlatL2(len(vectors[0]))
+        coarse.add(cq)
 
     # create indices for codebook
     for i in range(m):
@@ -86,15 +131,36 @@ def create_index_data(vectors, cq, codebook, logger):
     for c in range(len(vectors)):
         count += 1
         vec = vectors[c]
-        _, I = coarse.search(np.array([vec]), 1)
-        coarse_ids.append(I[0][0])
 
-        # update coarse counts
-        if I[0][0] in coarse_counts:
-            coarse_counts[I[0][0]] += 1
+        # determine coarse quantization for vec
+        if COARSE_TYPE == 'MULTI_INDEX':
+            # TODO
+            partition = np.array([
+                np.array(vec[i:i + coarse_params['len_centr']]).astype('float32') \
+                    for i in range(0, len(vec), coarse_params['len_centr'])])
+
+            entry = []
+            for i in range(coarse_params['m']):
+                _, I = coarse[i].search(np.array([partition[i]]), 1)
+                entry.append(I[0][0])
+            coarse_ids.append(entry)
+
+            if tuple(entry) in coarse_counts:
+                coarse_counts[tuple(entry)] += 1
+            else:
+                coarse_counts[tuple(entry)] = 1
+
         else:
-            coarse_counts[I[0][0]] = 1
+            _, I = coarse.search(np.array([vec]), 1)
+            coarse_ids.append(I[0][0])
 
+            # update coarse counts
+            if I[0][0] in coarse_counts:
+                coarse_counts[I[0][0]] += 1
+            else:
+                coarse_counts[I[0][0]] = 1
+
+        # determine fine quantization
         partition = np.array([
             np.array(vec[i:i + len_centr]).astype('float32') \
                 for i in range(0, len(vec), len_centr)])
@@ -150,9 +216,14 @@ def main(argc, argv):
     cq_filename = index_config.get_value('coarse_quantizer_file') if \
         index_config.has_key('coarse_quantizer_file') else None
     cq_output_name = cq_filename if cq_filename != None else 'coarse_quantizer.pcl'
-    cq = qcreator.construct_quantizer(qcreator.create_coarse_quantizer,
-        (vectors[:train_size_coarse], centr_num_coarse), logger,
-        input_name=cq_filename, output_name=cq_output_name)
+    if COARSE_TYPE == 'MULTI_INDEX':
+        cq = qcreator.construct_quantizer(qcreator.create_quantizer,
+            (vectors[:train_size_fine], 2, centr_num_coarse, logger), logger,
+            input_name=cq_filename, output_name=cq_output_name)
+    else:
+        cq = qcreator.construct_quantizer(qcreator.create_coarse_quantizer,
+            (vectors[:train_size_coarse], centr_num_coarse), logger,
+            input_name=cq_filename, output_name=cq_output_name)
 
     # determine codebook
     codebook = None
@@ -189,6 +260,7 @@ def main(argc, argv):
 
     # create statistics
     if (index_config.has_key('statistic_table') and index_config.has_key('statistic_column')):
+        # TODO SELECT init((SELECT get_vecs_name_original), ...) to set coarse_quantizer to current table
         utils.create_statistics_table(index_config.get_value('statistic_table'), index_config.get_value('statistic_column'), con, cur, logger)
 
     utils.enable_triggers(index_config.get_value('fine_table_name'), con, cur)
