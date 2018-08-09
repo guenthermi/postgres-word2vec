@@ -1,70 +1,73 @@
 #ifndef INDEX_UTILS_H
 #define INDEX_UTILS_H
 
+// clang-format off
+
 #include "postgres.h"
 #include "utils/array.h"
 
-typedef struct TopKEntry{
+// clang-format on
+
+typedef struct TopKEntry {
   int id;
   float distance;
-}TopKEntry;
+} TopKEntry;
 
-typedef struct TopKWordEntry{
+typedef struct TopKWordEntry {
   char* word;
   float distance;
-}TopKWordEntry;
+} TopKWordEntry;
 
-typedef struct TopKPVEntry{
+typedef struct TopKPVEntry {
   int id;
   float distance;
   float4* vector;
-}TopKPVEntry;
+} TopKPVEntry;
 
-typedef struct QueueEntry{
+typedef struct QueueEntry {
   int id;
   float distance;
   int positions[2];
-}QueueEntry;
+} QueueEntry;
 
-typedef struct DistancePQueue{
+typedef struct DistancePQueue {
   QueueEntry* nodes;
   int len;
-}DistancePQueue;
+} DistancePQueue;
 
 typedef TopKEntry* TopK;
 typedef TopKPVEntry* TopKPV;
 
-typedef struct CoarseQuantizerEntry{
-    int id;
-    float* vector;
-}CoarseQuantizerEntry;
+typedef struct CoarseQuantizerEntry {
+  int id;
+  float* vector;
+} CoarseQuantizerEntry;
 
-
-typedef struct CodebookEntry{
+typedef struct CodebookEntry {
   int pos;
   int code;
   float* vector;
 } CodebookEntry;
 
-typedef struct CodebookEntryComplete{
+typedef struct CodebookEntryComplete {
   int pos;
   int code;
   float* vector;
   int count;
 } CodebookEntryComplete;
 
-typedef struct WordVectors{
+typedef struct WordVectors {
   int* ids;
   float** vectors;
 } WordVectors;
 
-typedef struct Blacklist{
+typedef struct Blacklist {
   int id;
-  bool isValid; // id and next are only valid if isValid = true
+  bool isValid;  // id and next are only valid if isValid = true
   struct Blacklist* next;
 } Blacklist;
 
-typedef struct TargetListElem{
+typedef struct TargetListElem {
   int16** codes;
   int* ids;
   float4** vectors;
@@ -75,11 +78,21 @@ typedef struct TargetListElem{
 
 typedef TargetListElem* TargetLists;
 
-typedef enum {ORIGINAL, NORMALIZED, PQ_QUANTIZATION, CODEBOOK, RESIDUAL_QUANTIZATION, COARSE_QUANTIZATION, RESIDUAL_CODBOOK, IVPQ_QUANTIZATION, STATISTICS} tableType;
+typedef enum {
+  ORIGINAL,
+  NORMALIZED,
+  PQ_QUANTIZATION,
+  CODEBOOK,
+  RESIDUAL_QUANTIZATION,
+  COARSE_QUANTIZATION,
+  RESIDUAL_CODBOOK,
+  IVPQ_QUANTIZATION,
+  STATISTICS
+} tableType;
 
-typedef enum {PARAM_PVF, PARAM_W} parameterType;
+typedef enum { PARAM_PVF, PARAM_W } parameterType;
 
-typedef enum {PQ_CALC = 0, EXACT_CALC = 1, PQ_PV_CALC = 2} calculationMethod;
+typedef enum { PQ_CALC = 0, EXACT_CALC = 1, PQ_PV_CALC = 2 } calculationMethod;
 
 typedef CodebookEntry* Codebook;
 
@@ -89,38 +102,58 @@ typedef CoarseQuantizerEntry* CoarseQuantizer;
 
 void updateTopK(TopK tk, float distance, int id, int k, int maxDist);
 
-void updateTopKPV(TopKPV tk, float distance, int id, int k, int maxDist, float4* vector, int dim);
+void updateTopKPV(TopKPV tk, float distance, int id, int k, int maxDist,
+                  float4* vector, int dim);
 
 void updateTopKWordEntry(char** term, char* word);
 
 void initTopK(TopK* pTopK, int k, const float maxDist);
 
-void initTopKs(TopK** pTopKs, float** pMaxDists, int queryVectorsSize, int k, const float maxDist);
+void initTopKs(TopK** pTopKs, float** pMaxDists, int queryVectorsSize, int k,
+               const float maxDist);
 
 void initTopKPV(TopKPV* pTopK, int k, const float maxDist, int dim);
 
-void initTopKPVs(TopKPV** pTopKs, float** pMaxDists, int queryVectorsSize, int k, const float maxDist, int dim);
+void initTopKPVs(TopKPV** pTopKs, float** pMaxDists, int queryVectorsSize,
+                 int k, const float maxDist, int dim);
 
 QueueEntry pop(DistancePQueue* queue);
 
 void push(DistancePQueue* queue, float distance, int id, int positions[2]);
 
-int cmpTopKPVEntry (const void * a, const void * b);
+int cmpTopKPVEntry(const void* a, const void* b);
 
-int cmpTopKEntry (const void * a, const void * b);
+int cmpTopKEntry(const void* a, const void* b);
 
 bool inBlacklist(int id, Blacklist* bl);
 
 void addToBlacklist(int id, Blacklist* bl, Blacklist* emptyBl);
 
-bool determineCoarseIdsMultiWithStatistics(int*** pCqIds, int*** pCqTableIds, int** pCqTableIdCounts, int* queryVectorsIndices, int queryVectorsIndicesSize, int queryVectorsSize, float maxDist, CoarseQuantizer cq, int cqSize, float4** queryVectors, int queryDim, float* statistics, int inputIdsSize, const int minTargetCount, const float confidence);
+bool determineCoarseIdsMultiWithStatistics(
+    int*** pCqIds, int*** pCqTableIds, int** pCqTableIdCounts,
+    int* queryVectorsIndices, int queryVectorsIndicesSize, int queryVectorsSize,
+    float maxDist, CoarseQuantizer cq, int cqSize, float4** queryVectors,
+    int queryDim, float* statistics, int inputIdsSize, const int minTargetCount,
+    const float confidence);
 
-bool determineCoarseIdsMultiWithStatisticsMulti(int*** pCqIds, int*** pCqTableIds, int** pCqTableIdCounts,
-                        int* queryVectorsIndices, int queryVectorsIndicesSize, int queryVectorsSize,
-                        float maxDist, Codebook cq, int cqSize, int cqPositions, int cqCodes,
-                        float4** queryVectors, int queryDim, float* statistics, int inputIdsSize, const int minTargetCount, float confidence);
+bool determineCoarseIdsMultiWithStatisticsMulti(
+    int*** pCqIds, int*** pCqTableIds, int** pCqTableIdCounts,
+    int* queryVectorsIndices, int queryVectorsIndicesSize, int queryVectorsSize,
+    float maxDist, Codebook cq, int cqSize, int cqPositions, int cqCodes,
+    float4** queryVectors, int queryDim, float* statistics, int inputIdsSize,
+    const int minTargetCount, float confidence);
 
-void postverify(int* queryVectorsIndices, int queryVectorsIndicesSize, int k, int pvf, TopKPV* topKPVs, TopK* topKs, float4** queryVectors, int queryDim, const float maxDistance);
+void postverify(int* queryVectorsIndices, int queryVectorsIndicesSize, int k,
+                int pvf, TopKPV* topKPVs, TopK* topKs, float4** queryVectors,
+                int queryDim, const float maxDistance);
+
+void getPrecomputedDistances(float4* preDists, int cbPositions, int cbCodes,
+                             int subvectorSize, float4* queryVector,
+                             Codebook cb);
+
+void getPrecomputedDistancesDouble(float4* preDists, int cbPositions,
+                                   int cbCodes, int subvectorSize,
+                                   float4* queryVector, Codebook cb);
 
 float squareDistance(float* v1, float* v2, int n);
 
@@ -136,7 +169,8 @@ CoarseQuantizer getCoarseQuantizer(int* size);
 
 Codebook getCodebook(int* positions, int* codesize, char* tableName);
 
-CodebookWithCounts getCodebookWithCounts(int* positions, int* codesize, char* tableName);
+CodebookWithCounts getCodebookWithCounts(int* positions, int* codesize,
+                                         char* tableName);
 
 WordVectors getVectors(char* tableName, int* ids, int idsSize);
 
@@ -146,17 +180,27 @@ void getTableName(tableType type, char* name, int bufferSize);
 
 void getParameter(parameterType type, int* param);
 
-char **split(const char *str, char sep);
+char** split(const char* str, char sep);
 
-void updateCodebook(float** rawVectors, int rawVectorsSize, int subvectorSize, CodebookWithCounts cb, int cbPositions, int cbCodes, int** nearestCentroids, int* countIncs);
+void updateCodebook(float** rawVectors, int rawVectorsSize, int subvectorSize,
+                    CodebookWithCounts cb, int cbPositions, int cbCodes,
+                    int** nearestCentroids, int* countIncs);
 
-void updateCodebookRelation(CodebookWithCounts cb, int cbPositions, int cbCodes, char* tableNameCodebook, int* countIncs, int subvectorSize);
+void updateCodebookRelation(CodebookWithCounts cb, int cbPositions, int cbCodes,
+                            char* tableNameCodebook, int* countIncs,
+                            int subvectorSize);
 
-void updateProductQuantizationRelation(int** nearestCentroids, char** tokens, int cbPositions, CodebookWithCounts cb, char* pqQuantizationTable, int rawVectorsSize, int* cqQuantizations);
+void updateProductQuantizationRelation(int** nearestCentroids, char** tokens,
+                                       int cbPositions, CodebookWithCounts cb,
+                                       char* pqQuantizationTable,
+                                       int rawVectorsSize,
+                                       int* cqQuantizations);
 
-void updateWordVectorsRelation(char* tableName, char** tokens, float** rawVectors, int rawVectorsSize, int vectorSize);
+void updateWordVectorsRelation(char* tableName, char** tokens,
+                               float** rawVectors, int rawVectorsSize,
+                               int vectorSize);
 
-int compare (const void * a, const void * b);
+int compare(const void* a, const void* b);
 
 void convert_bytea_int32(bytea* bstring, int32** output, int32* size);
 
@@ -169,5 +213,38 @@ void convert_int32_bytea(int32* input, bytea** output, int size);
 void convert_int16_bytea(int16* input, bytea** output, int size);
 
 void convert_float4_bytea(float4* input, bytea** output, int size);
+
+inline float computePQDistanceInt16(float* preDists, int16* codes,
+                                    int cbPositions, int cbCodes) {
+  float distance = 0;
+  for (int l = 0; l < cbPositions; l++) {
+    distance += preDists[cbCodes * l + codes[l]];
+  }
+  return distance;
+}
+
+inline void addToTargetList(TargetListElem* targetLists, int queryVectorsIndex,
+                            const int target_lists_size, const int method,
+                            int16* codes, float4* vector, int wordId) {
+  TargetListElem* currentTargetList = targetLists[queryVectorsIndex].last;
+  currentTargetList->codes[currentTargetList->size] = codes;
+  currentTargetList->ids[currentTargetList->size] = wordId;
+  if (method == PQ_PV_CALC) {
+    currentTargetList->vectors[currentTargetList->size] = vector;
+  }
+  currentTargetList->size += 1;
+  if (currentTargetList->size == target_lists_size) {
+    currentTargetList->next = palloc(sizeof(TargetListElem));
+    currentTargetList->next->codes = palloc(sizeof(int16*) * target_lists_size);
+    currentTargetList->next->ids = palloc(sizeof(int) * target_lists_size);
+    if (method == PQ_PV_CALC) {
+      currentTargetList->next->vectors =
+          palloc(sizeof(float4*) * target_lists_size);
+    }
+    currentTargetList->next->size = 0;
+    currentTargetList->next->next = NULL;
+    targetLists[queryVectorsIndex].last = currentTargetList->next;
+  }
+}
 
 #endif /*INDEX_UTILS_H*/

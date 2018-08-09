@@ -132,9 +132,8 @@ SELECT set_analogy_function('analogy_3cosadd');
 SELECT set_analogy_in_function('analogy_3cosadd_in');
 SELECT set_groups_function('grouping_func');
 
-CREATE OR REPLACE FUNCTION create_statistics(table_name varchar, column_name varchar)  RETURNS void AS $$
+CREATE OR REPLACE FUNCTION create_statistics(table_name varchar, column_name varchar, coarse_table_name varchar)  RETURNS void AS $$
 DECLARE
-coarse_table_name varchar;
 ivpq_quantization varchar;
 number_of_coarse_ids int;
 stats_table_name varchar;
@@ -142,7 +141,6 @@ vec_table_name varchar;
 total_amount float;
 BEGIN
 stats_table_name = format('stat_%s_%s', table_name, column_name);
-EXECUTE 'SELECT get_vecs_name_coarse_quantization()' INTO coarse_table_name;
 EXECUTE 'SELECT get_vecs_name_ivpq_quantization()' INTO ivpq_quantization;
 EXECUTE 'SELECT get_vecs_name()' INTO vec_table_name;
 EXECUTE format('DROP TABLE IF EXISTS %s', stats_table_name);

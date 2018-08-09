@@ -78,8 +78,8 @@ def create_index(table_name, index_name, column_name, con, cur, logger):
     con.commit()
     logger.log(Logger.INFO, 'Created index ' + str(index_name) + ' on table ' + str(table_name) + ' for column ' + str(column_name))
 
-def create_statistics_table(table_name, column_name, con, cur, logger):
-    query = "SELECT create_statistics('" + table_name + "', '" + column_name + "')"
+def create_statistics_table(table_name, column_name, coarse_table_name, con, cur, logger):
+    query = "SELECT create_statistics('" + table_name + "', '" + column_name + "', '" + coarse_table_name + "')"
     cur.execute(query)
     con.commit()
     logger.log(Logger.INFO, 'Created statistics table')

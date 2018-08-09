@@ -260,8 +260,7 @@ def main(argc, argv):
 
     # create statistics
     if (index_config.has_key('statistic_table') and index_config.has_key('statistic_column')):
-        # TODO SELECT init((SELECT get_vecs_name_original), ...) to set coarse_quantizer to current table
-        utils.create_statistics_table(index_config.get_value('statistic_table'), index_config.get_value('statistic_column'), con, cur, logger)
+        utils.create_statistics_table(index_config.get_value('statistic_table'), index_config.get_value('statistic_column'), index_config.get_value('coarse_table_name'), con, cur, logger)
 
     utils.enable_triggers(index_config.get_value('fine_table_name'), con, cur)
 
