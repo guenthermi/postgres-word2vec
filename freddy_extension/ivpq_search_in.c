@@ -90,18 +90,14 @@ Datum ivpq_search_in(PG_FUNCTION_ARGS) {
     int queryDim;
     int subvectorSize = 0;
 
-    Codebook cb;
-    int cbPositions = 0;
-    int cbCodes = 0;
+    CodebookCompound cb;
     const int DOUBLE_THRESHOLD = 50000;
     bool double_codes = false;
     int codesNumber = 0;
 
 #ifdef USE_MULTI_COARSE
-    Codebook cqMulti;
+    CodebookCompound cqMulti;
     char *tableNameCQ = palloc(sizeof(char) * 100);
-    int cqCodes = 0;
-    int cqPositions = 0;
 #endif
 #ifndef USE_MULTI_COARSE
     CoarseQuantizer cq;
@@ -146,9 +142,7 @@ Datum ivpq_search_in(PG_FUNCTION_ARGS) {
     Datum *idsData;
     Datum *i_data;  // for query vectors
 
-    int ret;
-    int proc;
-    bool info;
+    ResultInfo rInfo;
 
     char *command;
     char *cur;
@@ -215,14 +209,14 @@ Datum ivpq_search_in(PG_FUNCTION_ARGS) {
 
     if ((method == PQ_CALC) || (method == PQ_PV_CALC)) {
       // get codebook
-      cb = getCodebook(&cbPositions, &cbCodes, tableNameCodebook);
-      subvectorSize = queryDim / cbPositions;
+      cb = getCodebook(tableNameCodebook);
+      subvectorSize = queryDim / cb.positions;
     }
 // get coarse quantizer
 #ifdef USE_MULTI_COARSE
     getTableName(COARSE_QUANTIZATION, tableNameCQ, 100);
-    cqMulti = getCodebook(&cqPositions, &cqCodes, tableNameCQ);
-    cqSize = pow(cqCodes, cqPositions);
+    cqMulti = getCodebook(tableNameCQ);
+    cqSize = pow(cqMulti.codeSize, cqMulti.positions);
 #endif
 #ifndef USE_MULTI_COARSE
     cq = getCoarseQuantizer(&cqSize);
@@ -267,23 +261,25 @@ Datum ivpq_search_in(PG_FUNCTION_ARGS) {
       // compute querySimilarities (precomputed distances) for product
       // quantization
       if (double_codes) {
-        codesNumber = cbPositions / 2;
+        codesNumber = cb.positions / 2;
         querySimilarities = palloc(sizeof(float4 *) * queryVectorsSize);
         for (int i = 0; i < queryVectorsSize; i++) {
           querySimilarities[i] =
-              palloc(codesNumber * cbCodes * cbCodes * sizeof(float4));
-          getPrecomputedDistancesDouble(querySimilarities[i], cbPositions,
-                                        cbCodes, subvectorSize, queryVectors[i],
-                                        cb);
+              palloc(codesNumber * cb.codeSize * cb.codeSize * sizeof(float4));
+          getPrecomputedDistancesDouble(querySimilarities[i], cb.positions,
+                                        cb.codeSize, subvectorSize,
+                                        queryVectors[i], cb.codebook);
         }
 
       } else {
-        codesNumber = cbPositions;
+        codesNumber = cb.positions;
         querySimilarities = palloc(sizeof(float4 *) * queryVectorsSize);
         for (int i = 0; i < queryVectorsSize; i++) {
-          querySimilarities[i] = palloc(cbPositions * cbCodes * sizeof(float4));
-          getPrecomputedDistances(querySimilarities[i], cbPositions, cbCodes,
-                                  subvectorSize, queryVectors[i], cb);
+          querySimilarities[i] =
+              palloc(cb.positions * cb.codeSize * sizeof(float4));
+          getPrecomputedDistances(querySimilarities[i], cb.positions,
+                                  cb.codeSize, subvectorSize, queryVectors[i],
+                                  cb.codebook);
         }
       }
     }
@@ -293,7 +289,7 @@ Datum ivpq_search_in(PG_FUNCTION_ARGS) {
          (double)(end - last) / CLOCKS_PER_SEC);
     last = clock();
 
-    proc = 0;
+    rInfo.proc = 0;
     while (queryVectorsIndicesSize > 0) {
       // compute coarse ids
       int coarse_ids_size = 0;
@@ -324,9 +320,9 @@ Datum ivpq_search_in(PG_FUNCTION_ARGS) {
 #ifdef USE_MULTI_COARSE
       lastIteration = determineCoarseIdsMultiWithStatisticsMulti(
           &cqIdsMulti, &cqTableIds, &cqTableIdCounts, queryVectorsIndices,
-          queryVectorsIndicesSize, queryVectorsSize, MAX_DIST, cqMulti, cqSize,
-          cqPositions, cqCodes, queryVectors, queryDim, statistics,
-          inputIdsSize, (k * se), confidence);
+          queryVectorsIndicesSize, queryVectorsSize, MAX_DIST, cqMulti.codebook,
+          cqSize, cqMulti.positions, cqMulti.codeSize, queryVectors, queryDim,
+          statistics, inputIdsSize, (k * se), confidence);
 #endif
 #ifndef USE_MULTI_COARSE
       lastIteration = determineCoarseIdsMultiWithStatistics(
@@ -396,14 +392,14 @@ Datum ivpq_search_in(PG_FUNCTION_ARGS) {
            (double)(end - last) / CLOCKS_PER_SEC);
       last = clock();
       SPI_connect();
-      ret = SPI_execute(command, true, 0);
+      rInfo.ret = SPI_execute(command, true, 0);
       end = clock();
       elog(INFO, "TRACK data_retrieval_time %f",
            (double)(end - last) / CLOCKS_PER_SEC);
       last = clock();
-      proc = SPI_processed;
-      elog(INFO, "TRACK retrieved %d results", proc);
-      if (ret > 0 && SPI_tuptable != NULL) {
+      rInfo.proc = SPI_processed;
+      elog(INFO, "TRACK retrieved %d results", rInfo.proc);
+      if (rInfo.ret > 0 && SPI_tuptable != NULL) {
         TupleDesc tupdesc = SPI_tuptable->tupdesc;
         SPITupleTable *tuptable = SPI_tuptable;
         int i;
@@ -411,41 +407,40 @@ Datum ivpq_search_in(PG_FUNCTION_ARGS) {
         float4 *vector;  // for post verification
         int offset =
             (method == PQ_PV_CALC) ? 4 : 3;  // position offset for coarseIds
-        // long* indices = palloc(sizeof(long)*cbPositions);
         int l;
         int16 *codes2;
-        int codeRange = double_codes ? cbCodes * cbCodes : cbCodes;
-        for (i = 0; i < proc; i++) {
+        int codeRange = double_codes ? cb.codeSize * cb.codeSize : cb.codeSize;
+        for (i = 0; i < rInfo.proc; i++) {
           int coarseId;
           int16 *codes;
           int wordId;
           float distance;
           float *next;
           HeapTuple tuple = tuptable->vals[i];
-          wordId = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &info));
+          wordId = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &rInfo.info));
           n = 0;
           if ((method == PQ_PV_CALC) || (method == PQ_CALC)) {
             convert_bytea_int16(
-                DatumGetByteaP(SPI_getbinval(tuple, tupdesc, 2, &info)), &codes,
-                &n);
+                DatumGetByteaP(SPI_getbinval(tuple, tupdesc, 2, &rInfo.info)),
+                &codes, &n);
             n = 0;
           }
           if (method == EXACT_CALC) {
             convert_bytea_float4(
-                DatumGetByteaP(SPI_getbinval(tuple, tupdesc, 2, &info)),
+                DatumGetByteaP(SPI_getbinval(tuple, tupdesc, 2, &rInfo.info)),
                 &vector, &n);
             n = 0;
           }
           if (method == PQ_PV_CALC) {
             convert_bytea_float4(
-                DatumGetByteaP(SPI_getbinval(tuple, tupdesc, 3, &info)),
+                DatumGetByteaP(SPI_getbinval(tuple, tupdesc, 3, &rInfo.info)),
                 &vector, &n);
             n = 0;
           }
           if (double_codes) {
             codes2 = palloc(sizeof(int) * codesNumber);
             for (l = 0; l < codesNumber; l++) {
-              codes2[l] = codes[l * 2] + codes[l * 2 + 1] * cbCodes;
+              codes2[l] = codes[l * 2] + codes[l * 2 + 1] * cb.codeSize;
             }
           } else {
             codes2 = codes;
@@ -453,7 +448,7 @@ Datum ivpq_search_in(PG_FUNCTION_ARGS) {
 
           // read coarse ids
           coarseId =
-              DatumGetInt32(SPI_getbinval(tuple, tupdesc, offset, &info));
+              DatumGetInt32(SPI_getbinval(tuple, tupdesc, offset, &rInfo.info));
           // calculate distances
           for (int j = 0; j < cqTableIdCounts[coarseId]; j++) {
             int queryVectorsIndex = cqTableIds[coarseId][j];
@@ -485,8 +480,9 @@ Datum ivpq_search_in(PG_FUNCTION_ARGS) {
                   for (int n = 0; n < 200; n++) {
                     if (j + n < cqTableIdCounts[coarseId]) {
                       next = querySimilarities[cqTableIds[coarseId][j + n]];
-                      for (l = 0; l < cbPositions; l++) {
-                        __builtin_prefetch(&next[cbCodes * l + codes2[l]], 0);
+                      for (l = 0; l < cb.positions; l++) {
+                        __builtin_prefetch(&next[cb.codeSize * l + codes2[l]],
+                                           0);
                       }
                     }
                   }

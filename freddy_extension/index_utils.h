@@ -8,6 +8,12 @@
 
 // clang-format on
 
+typedef struct ResultInfo {
+  int ret;
+  int proc;
+  bool info;
+} ResultInfo;
+
 typedef struct TopKEntry {
   int id;
   float distance;
@@ -100,6 +106,12 @@ typedef CodebookEntryComplete* CodebookWithCounts;
 
 typedef CoarseQuantizerEntry* CoarseQuantizer;
 
+typedef struct CodebookCompound {
+  Codebook codebook;
+  int codeSize;
+  int positions;
+} CodebookCompound;
+
 void updateTopK(TopK tk, float distance, int id, int k, int maxDist);
 
 void updateTopKPV(TopKPV tk, float distance, int id, int k, int maxDist,
@@ -167,7 +179,7 @@ float* getStatistics(void);
 
 CoarseQuantizer getCoarseQuantizer(int* size);
 
-Codebook getCodebook(int* positions, int* codesize, char* tableName);
+CodebookCompound getCodebook(char* tableName);
 
 CodebookWithCounts getCodebookWithCounts(int* positions, int* codesize,
                                          char* tableName);

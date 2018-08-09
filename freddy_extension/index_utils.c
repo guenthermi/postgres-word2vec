@@ -523,8 +523,7 @@ void shuffle(int* input, int* output, int inputSize, int outputSize) {
 
 CoarseQuantizer getCoarseQuantizer(int* size) {
   char* command;
-  int ret;
-  int proc;
+  ResultInfo rInfo;
 
   float4* tmp;
 
@@ -535,15 +534,15 @@ CoarseQuantizer getCoarseQuantizer(int* size) {
   SPI_connect();
   command = palloc(100 * sizeof(char));
   sprintf(command, "SELECT * FROM %s", tableNameCQ);
-  ret = SPI_exec(command, 0);
-  proc = SPI_processed;
-  *size = proc;
-  result = SPI_palloc(proc * sizeof(CoarseQuantizerEntry));
-  if (ret > 0 && SPI_tuptable != NULL) {
+  rInfo.ret = SPI_exec(command, 0);
+  rInfo.proc = SPI_processed;
+  *size = rInfo.proc;
+  result = SPI_palloc(rInfo.proc * sizeof(CoarseQuantizerEntry));
+  if (rInfo.ret > 0 && SPI_tuptable != NULL) {
     TupleDesc tupdesc = SPI_tuptable->tupdesc;
     SPITupleTable* tuptable = SPI_tuptable;
     int i;
-    for (i = 0; i < proc; i++) {
+    for (i = 0; i < rInfo.proc; i++) {
       Datum id;
       Datum vector;
 
@@ -551,10 +550,9 @@ CoarseQuantizer getCoarseQuantizer(int* size) {
 
       bytea* vectorData;
 
-      bool info;
       HeapTuple tuple = tuptable->vals[i];
-      id = SPI_getbinval(tuple, tupdesc, 1, &info);
-      vector = SPI_getbinval(tuple, tupdesc, 2, &info);
+      id = SPI_getbinval(tuple, tupdesc, 1, &rInfo.info);
+      vector = SPI_getbinval(tuple, tupdesc, 2, &rInfo.info);
       vectorData = DatumGetByteaP(vector);
 
       result[i].id = DatumGetInt32(id);
@@ -569,56 +567,57 @@ CoarseQuantizer getCoarseQuantizer(int* size) {
   return result;
 }
 
-Codebook getCodebook(int* positions, int* codesize, char* tableName) {
+CodebookCompound getCodebook(char* tableName) {
   char command[100];
-  int ret;
-  int proc;
+  ResultInfo rInfo;
 
   float4* tmp;
 
-  Codebook result;
+  CodebookCompound result;
 
   bytea* vectorData;
 
+  result.codeSize = 0;
+  result.positions = 0;
+
   SPI_connect();
   sprintf(command, "SELECT * FROM %s ORDER BY pos", tableName);
-  ret = SPI_exec(command, 0);
-  proc = SPI_processed;
-  result = SPI_palloc(proc * sizeof(CodebookEntry));
-  if (ret > 0 && SPI_tuptable != NULL) {
+  rInfo.ret = SPI_exec(command, 0);
+  rInfo.proc = SPI_processed;
+  result.codebook = SPI_palloc(rInfo.proc * sizeof(CodebookEntry));
+  if (rInfo.ret > 0 && SPI_tuptable != NULL) {
     TupleDesc tupdesc = SPI_tuptable->tupdesc;
     SPITupleTable* tuptable = SPI_tuptable;
     int i;
-    for (i = 0; i < proc; i++) {
+    for (i = 0; i < rInfo.proc; i++) {
       Datum pos;
       Datum code;
       Datum vector;
 
       int n = 0;
 
-      bool info;
       HeapTuple tuple = tuptable->vals[i];
-      pos = SPI_getbinval(tuple, tupdesc, 2, &info);
-      code = SPI_getbinval(tuple, tupdesc, 3, &info);
-      vector = SPI_getbinval(tuple, tupdesc, 4, &info);
+      pos = SPI_getbinval(tuple, tupdesc, 2, &rInfo.info);
+      code = SPI_getbinval(tuple, tupdesc, 3, &rInfo.info);
+      vector = SPI_getbinval(tuple, tupdesc, 4, &rInfo.info);
 
-      (*positions) = fmax((*positions), pos);
-      (*codesize) = fmax((*codesize), code);
+      result.positions = fmax(result.positions, pos);
+      result.codeSize = fmax(result.codeSize, code);
 
-      result[i].pos = DatumGetInt32(pos);
-      result[i].code = DatumGetInt32(code);
+      result.codebook[i].pos = DatumGetInt32(pos);
+      result.codebook[i].code = DatumGetInt32(code);
 
       vectorData = DatumGetByteaP(vector);
       tmp = (float4*)VARDATA(vectorData);
-      result[i].vector = SPI_palloc(VARSIZE(vectorData) - VARHDRSZ);
+      result.codebook[i].vector = SPI_palloc(VARSIZE(vectorData) - VARHDRSZ);
       n = (VARSIZE(vectorData) - VARHDRSZ) / sizeof(float4);
-      memcpy(result[i].vector, tmp, n * sizeof(float4));
+      memcpy(result.codebook[i].vector, tmp, n * sizeof(float4));
     }
     SPI_finish();
   }
 
-  *positions += 1;
-  *codesize += 1;
+  result.positions += 1;
+  result.codeSize += 1;
 
   return result;
 }
@@ -626,8 +625,7 @@ Codebook getCodebook(int* positions, int* codesize, char* tableName) {
 float* getStatistics() {
   float* result;
   char command[100];
-  int ret;
-  int proc;
+  ResultInfo rInfo;
   char* tableName = palloc(sizeof(char) * 100);
 
   getTableName(STATISTICS, tableName, 100);
@@ -635,22 +633,22 @@ float* getStatistics() {
   SPI_connect();
   sprintf(command, "SELECT coarse_id, coarse_freq FROM %s", tableName);
 
-  ret = SPI_exec(command, 0);
-  proc = SPI_processed;
+  rInfo.ret = SPI_exec(command, 0);
+  rInfo.proc = SPI_processed;
 
-  result = SPI_palloc(proc * sizeof(float));
+  result = SPI_palloc(rInfo.proc * sizeof(float));
 
-  if (ret > 0 && SPI_tuptable != NULL) {
+  if (rInfo.ret > 0 && SPI_tuptable != NULL) {
     TupleDesc tupdesc = SPI_tuptable->tupdesc;
     SPITupleTable* tuptable = SPI_tuptable;
     int i;
-    for (i = 0; i < proc; i++) {
-      bool info;
+    for (i = 0; i < rInfo.proc; i++) {
       HeapTuple tuple = tuptable->vals[i];
 
-      int coarse_id = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &info));
+      int coarse_id =
+          DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &rInfo.info));
       result[coarse_id] =
-          DatumGetFloat4(SPI_getbinval(tuple, tupdesc, 2, &info));
+          DatumGetFloat4(SPI_getbinval(tuple, tupdesc, 2, &rInfo.info));
     }
   }
 
@@ -678,8 +676,7 @@ float getConfidenceHyp(int expect, int size, float p, int stat_size) {
 CodebookWithCounts getCodebookWithCounts(int* positions, int* codesize,
                                          char* tableName) {
   char command[50];
-  int ret;
-  int proc;
+  ResultInfo rInfo;
   float4* tmp;
 
   bytea* vectorData;
@@ -688,26 +685,25 @@ CodebookWithCounts getCodebookWithCounts(int* positions, int* codesize,
   SPI_connect();
   sprintf(command, "SELECT * FROM %s", tableName);
 
-  ret = SPI_exec(command, 0);
-  proc = SPI_processed;
-  result = SPI_palloc(proc * sizeof(CodebookEntryComplete));
-  if (ret > 0 && SPI_tuptable != NULL) {
+  rInfo.ret = SPI_exec(command, 0);
+  rInfo.proc = SPI_processed;
+  result = SPI_palloc(rInfo.proc * sizeof(CodebookEntryComplete));
+  if (rInfo.ret > 0 && SPI_tuptable != NULL) {
     TupleDesc tupdesc = SPI_tuptable->tupdesc;
     SPITupleTable* tuptable = SPI_tuptable;
     int i;
-    for (i = 0; i < proc; i++) {
+    for (i = 0; i < rInfo.proc; i++) {
       Datum pos;
       Datum code;
       Datum vector;
       Datum count;
       int n = 0;
 
-      bool info;
       HeapTuple tuple = tuptable->vals[i];
-      pos = SPI_getbinval(tuple, tupdesc, 2, &info);
-      code = SPI_getbinval(tuple, tupdesc, 3, &info);
-      vector = SPI_getbinval(tuple, tupdesc, 4, &info);
-      count = SPI_getbinval(tuple, tupdesc, 5, &info);
+      pos = SPI_getbinval(tuple, tupdesc, 2, &rInfo.info);
+      code = SPI_getbinval(tuple, tupdesc, 3, &rInfo.info);
+      vector = SPI_getbinval(tuple, tupdesc, 4, &rInfo.info);
+      count = SPI_getbinval(tuple, tupdesc, 5, &rInfo.info);
 
       (*positions) = fmax((*positions), pos);
       (*codesize) = fmax((*codesize), code);
@@ -734,9 +730,7 @@ CodebookWithCounts getCodebookWithCounts(int* positions, int* codesize,
 WordVectors getVectors(char* tableName, int* ids, int idsSize) {
   char* command;
   char* cur;
-  int ret;
-  int proc;
-  bool info;
+  ResultInfo rInfo;
 
   int n = 0;
 
@@ -760,13 +754,13 @@ WordVectors getVectors(char* tableName, int* ids, int idsSize) {
   }
   cur += sprintf(cur, ")");
 
-  ret = SPI_exec(command, 0);
-  proc = SPI_processed;
-  if (ret > 0 && SPI_tuptable != NULL) {
+  rInfo.ret = SPI_exec(command, 0);
+  rInfo.proc = SPI_processed;
+  if (rInfo.ret > 0 && SPI_tuptable != NULL) {
     TupleDesc tupdesc = SPI_tuptable->tupdesc;
     SPITupleTable* tuptable = SPI_tuptable;
     int i;
-    for (i = 0; i < proc; i++) {
+    for (i = 0; i < rInfo.proc; i++) {
       Datum id;
       Datum vector;
       float4* data;
@@ -774,8 +768,8 @@ WordVectors getVectors(char* tableName, int* ids, int idsSize) {
       int wordId;
 
       HeapTuple tuple = tuptable->vals[i];
-      id = SPI_getbinval(tuple, tupdesc, 1, &info);
-      vector = SPI_getbinval(tuple, tupdesc, 2, &info);
+      id = SPI_getbinval(tuple, tupdesc, 1, &rInfo.info);
+      vector = SPI_getbinval(tuple, tupdesc, 2, &rInfo.info);
       wordId = DatumGetInt32(id);
 
       convert_bytea_float4(DatumGetByteaP(vector), &data, &n);
@@ -843,10 +837,7 @@ void getTableName(tableType type, char* name, int bufferSize) {
 
 void getParameter(parameterType type, int* param) {
   char* command;
-  int ret;
-  int proc;
-  bool info;
-
+  ResultInfo rInfo;
   const char* function_names[] = {"get_pvf()", "get_w()"};
 
   SPI_connect();
@@ -854,17 +845,17 @@ void getParameter(parameterType type, int* param) {
   command = palloc(100 * sizeof(char));
   sprintf(command, "SELECT * FROM %s", function_names[type]);
 
-  ret = SPI_exec(command, 0);
-  proc = SPI_processed;
-  if (ret > 0 && SPI_tuptable != NULL) {
+  rInfo.ret = SPI_exec(command, 0);
+  rInfo.proc = SPI_processed;
+  if (rInfo.ret > 0 && SPI_tuptable != NULL) {
     TupleDesc tupdesc = SPI_tuptable->tupdesc;
     SPITupleTable* tuptable = SPI_tuptable;
     HeapTuple tuple;
-    if (proc != 1) {
-      elog(ERROR, "Unexpected number of results: %d", proc);
+    if (rInfo.proc != 1) {
+      elog(ERROR, "Unexpected number of results: %d", rInfo.proc);
     }
     tuple = tuptable->vals[0];
-    *param = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &info));
+    *param = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &rInfo.info));
   }
   SPI_finish();
 }
