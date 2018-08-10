@@ -407,6 +407,7 @@ bool determineCoarseIdsMultiWithStatisticsMulti(
       }
       cqIds[queryIndex] = palloc(sizeof(int) * max_coarse_order);
       memcpy(cqIds[queryIndex], currentCqIds, max_coarse_order * sizeof(int));
+      // elog(INFO, "TRACK target_count %f", prob*inputIdsSize); // to get statistics
     } else {
       while ((getConfidenceHyp(minTargetCount, inputIdsSize, prob,
                                statistics[cqSize]) < confidence) &&
@@ -417,7 +418,7 @@ bool determineCoarseIdsMultiWithStatisticsMulti(
       if (max_coarse_order < (cqSize - 1)) {
         lastIteration = false;
       }
-      // elog(INFO, "TRACK target_count %f", targetCount); // to get statistics
+      // elog(INFO, "TRACK target_count %f", prob*inputIdsSize); // to get statistics
       // about the quality of the prediction
       cqIds[queryIndex] = palloc(sizeof(int) * max_coarse_order);
       for (int i = 0; i < max_coarse_order; i++) {
@@ -660,7 +661,7 @@ float* getStatistics() {
 float getConfidenceBin(int expect, int size, float p) {
   float mu = size * p;
   float sig = sqrt(size * p * (1.0 - p));
-  return 1.0 - 0.5 * (1 + erf((expect - 0.5 - mu) / sig));
+  return 1.0 - 0.5 * (1 + erf((expect - 0.5 - mu) / (sig*sqrt(2))));
 }
 
 float getConfidenceHyp(int expect, int size, float p, int stat_size) {
@@ -670,7 +671,7 @@ float getConfidenceHyp(int expect, int size, float p, int stat_size) {
   float mu = size * p;
   float sig = sqrt(size * p * (1.0 - p)) *
               (((float)stat_size - size) / ((float)stat_size - 1.0));
-  return 1.0 - 0.5 * (1.0 + erf((expect - 0.5 - mu) / sig));
+  return 1.0 - 0.5 * (1.0 + erf(( ((float)expect) - 0.5 - mu) / (sig*sqrt(2))));
 }
 
 CodebookWithCounts getCodebookWithCounts(int* positions, int* codesize,
