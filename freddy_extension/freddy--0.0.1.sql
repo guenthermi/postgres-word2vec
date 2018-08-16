@@ -58,6 +58,13 @@ END
 $$
 LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION  set_long_codes_threshold(threshold integer) RETURNS void AS $$
+BEGIN
+EXECUTE format('CREATE OR REPLACE FUNCTION get_long_codes_threshold() RETURNS float4 AS ''SELECT ''''%s''''::float4'' LANGUAGE sql IMMUTABLE', threshold);
+END
+$$
+LANGUAGE plpgsql;
+
 CREATE OR REPLACE FUNCTION set_statistics_table(table_name regclass) RETURNS void AS $$
 BEGIN
 EXECUTE format('CREATE OR REPLACE FUNCTION get_statistics_table() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', table_name);
@@ -123,6 +130,8 @@ END$$;
 SELECT set_pvf(20);
 SELECT set_w(3);
 SELECT set_se(3);
+SELECT set_confidence_value(0.8);
+SELECT set_long_codes_threshold(10000000);
 SELECT set_method_flag(0);
 SELECT set_use_targetlist('true');
 SELECT set_knn_function('k_nearest_neighbour');
@@ -297,7 +306,7 @@ CREATE OR REPLACE FUNCTION pq_search_in(bytea, integer, integer[]) RETURNS SETOF
 AS '$libdir/freddy', 'pq_search_in'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE OR REPLACE FUNCTION ivpq_search_in(bytea[], integer[], integer, integer[], integer, integer, integer, boolean, float4) RETURNS SETOF record
+CREATE OR REPLACE FUNCTION ivpq_search_in(bytea[], integer[], integer, integer[], integer, integer, integer, boolean, float4, integer) RETURNS SETOF record
 AS '$libdir/freddy', 'ivpq_search_in'
 LANGUAGE C IMMUTABLE STRICT;
 
@@ -599,6 +608,7 @@ se integer;
 method_flag integer;
 use_targetlist boolean;
 confidence float4;
+long_codes_threshold integer;
 formated varchar[];
 formated_queries varchar[];
 ids integer[];
@@ -612,6 +622,7 @@ EXECUTE 'SELECT get_se()' INTO se;
 EXECUTE 'SELECT get_method_flag()' INTO method_flag;
 EXECUTE 'SELECT get_use_targetlist()' INTO use_targetlist;
 EXECUTE 'SELECT get_confidence_value()' INTO confidence;
+EXECUTE 'SELECT get_long_codes_threshold()' INTO long_codes_threshold;
 FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
   formated[I] = replace(input_set[I], '''', '''''');
 END LOOP;
@@ -627,8 +638,8 @@ FOR rec IN EXECUTE format('SELECT word, vector, id FROM %s WHERE word = ANY(''%s
 END LOOP;
 RETURN QUERY EXECUTE format('
 SELECT f.word, g.word, (1.0 - (distance / 2.0))::float4 as similarity
-FROM %s(''%s''::bytea[], ''%s''::integer[], ''%s''::int, ARRAY(SELECT id FROM %s WHERE word = ANY(''%s''::varchar(100)[])), %s, %s, %s, ''%s'', %s) AS (qid integer, tid integer, distance float4) INNER JOIN %s AS f ON qid = f.id INNER JOIN %s AS g ON tid = g.id;
-', function_name, vectors, ids, k, table_name, formated, se, post_verif, method_flag, use_targetlist, confidence, table_name, table_name);
+FROM %s(''%s''::bytea[], ''%s''::integer[], ''%s''::int, ARRAY(SELECT id FROM %s WHERE word = ANY(''%s''::varchar(100)[])), %s, %s, %s, ''%s'', %s, %s) AS (qid integer, tid integer, distance float4) INNER JOIN %s AS f ON qid = f.id INNER JOIN %s AS g ON tid = g.id;
+', function_name, vectors, ids, k, table_name, formated, se, post_verif, method_flag, use_targetlist, confidence, long_codes_threshold, table_name, table_name);
 END
 $$
 LANGUAGE plpgsql;

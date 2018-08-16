@@ -91,7 +91,7 @@ Datum ivpq_search_in(PG_FUNCTION_ARGS) {
     int subvectorSize = 0;
 
     CodebookCompound cb;
-    const int DOUBLE_THRESHOLD = 50000;
+    int double_threshold = 0;
     bool double_codes = false;
     int codesNumber = 0;
 
@@ -199,6 +199,7 @@ Datum ivpq_search_in(PG_FUNCTION_ARGS) {
         6);  // (0: PQ / 1: EXACT / 2: PQ with post verification)
     useTargetLists = PG_GETARG_BOOL(7);
     confidence = PG_GETARG_FLOAT4(8);
+    double_threshold = PG_GETARG_INT32(9);
     se = se_original;
 
     queryVectorsIndicesSize = queryVectorsSize;
@@ -253,7 +254,7 @@ Datum ivpq_search_in(PG_FUNCTION_ARGS) {
     }
 
     if ((method == PQ_CALC) || (method == PQ_PV_CALC)) {
-      if (se * k > DOUBLE_THRESHOLD) {
+      if (se * k > double_threshold) {
         double_codes = true;
       } else {
         double_codes = false;
