@@ -31,7 +31,7 @@ def get_table_information(index_config):
             schemes.append((index_config.get_value('coarse_table_name'),
                 "(id serial PRIMARY KEY, vector bytea, count int)"))
         # quantization table
-        schemes.append((index_config.get_value('fine_table_name'), "(id serial PRIMARY KEY, coarse_id integer, word_id integer, vector bytea)"))
+        schemes.append((index_config.get_value('fine_table_name'), "(id serial PRIMARY KEY, coarse_id integer, vector bytea)"))
         # codebook
         schemes.append((index_config.get_value('cb_table_name'),
             "(id serial PRIMARY KEY, pos int, code int, vector bytea, count int)"))
@@ -49,7 +49,7 @@ def get_table_information(index_config):
 
         # quantization table
         schemes.append((index_config.get_value('fine_table_name'),
-            "(id serial PRIMARY KEY, coarse_id integer, word_id integer, vector int[])"))
+            "(id serial PRIMARY KEY, coarse_id integer, vector int[])"))
         # codebook
         schemes.append((index_config.get_value('cb_table_name'),
             "(id serial PRIMARY KEY, pos int, code int, vector float4[], count int)"))
@@ -78,18 +78,18 @@ def add_to_database(words, cq, codebook, pq_quantization, coarse_counts, \
             coarse_id = str(combine_centroids(pq_quantization[i][0], index_config.get_value('k_coarse')))
         else:
             coarse_id = str(pq_quantization[i][0])
-        value_entry = {"word_id": i+1, "vector": output_vec, "coarse_id": coarse_id}
+        value_entry = {"id": i+1, "vector": output_vec, "coarse_id": coarse_id}
         values.append(value_entry)
         if (i % (batch_size-1) == 0) or (i == (len(pq_quantization)-1)):
             if USE_BYTEA_TYPE:
                 query = "INSERT INTO "+ index_config.get_value('fine_table_name') + \
-                    " (" + coarse_id_column + ", word_id,vector) VALUES (" + \
-                    '%(coarse_id)s' + ", %(word_id)s, vec_to_bytea(%(vector)s::int2[]))"
+                    " (" + coarse_id_column + ", id,vector) VALUES (" + \
+                    '%(coarse_id)s' + ", %(id)s, vec_to_bytea(%(vector)s::int2[]))"
                 cur.executemany(query, tuple(values))
             else:
                 query = "INSERT INTO "+ index_config.get_value('fine_table_name') + \
-                    " (" + coarse_id_column + ", word_id,vector) VALUES ("+ \
-                    '%(coarse_id)s' + ", %(word_id)s, %(vector)s)"
+                    " (" + coarse_id_column + ", id,vector) VALUES ("+ \
+                    '%(coarse_id)s' + ", %(id)s, %(vector)s)"
                 cur.executemany(query, tuple(values))
             con.commit()
             logger.log(Logger.INFO, 'Inserted ' +  str(i+1) + ' vectors')
@@ -253,7 +253,7 @@ def main(argc, argv):
         con, cur, index_config, batch_size, logger)
     logger.log(logger.INFO, 'Create database index structures')
     utils.create_index(index_config.get_value('fine_table_name'),
-        index_config.get_value('fine_word_index_name'), 'word_id', con, cur, logger)
+        index_config.get_value('fine_word_index_name'), 'id', con, cur, logger)
     utils.create_index(index_config.get_value('fine_table_name'),
         index_config.get_value('fine_coarse_index_name'),
         'coarse_id', con, cur, logger)

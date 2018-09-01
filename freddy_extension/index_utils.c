@@ -1,4 +1,6 @@
 
+#define LOG_TARGET_COUNTS
+
 // clang-format off
 
 #include "index_utils.h"
@@ -407,7 +409,9 @@ bool determineCoarseIdsMultiWithStatisticsMulti(
       }
       cqIds[queryIndex] = palloc(sizeof(int) * max_coarse_order);
       memcpy(cqIds[queryIndex], currentCqIds, max_coarse_order * sizeof(int));
-      // elog(INFO, "TRACK target_count %f", prob*inputIdsSize); // to get
+      #ifdef LOG_TARGET_COUNTS
+      elog(INFO, "TRACK target_count %f", prob*inputIdsSize); // to get
+      #endif
       // statistics
     } else {
       while ((getConfidenceHyp(minTargetCount, inputIdsSize, prob,

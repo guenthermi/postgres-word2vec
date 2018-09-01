@@ -30,9 +30,9 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION set_se(se integer) RETURNS void AS $$
+CREATE OR REPLACE FUNCTION set_alpha(alpha integer) RETURNS void AS $$
 BEGIN
-EXECUTE format('CREATE OR REPLACE FUNCTION get_se() RETURNS integer AS ''SELECT %s'' LANGUAGE sql IMMUTABLE', se);
+EXECUTE format('CREATE OR REPLACE FUNCTION get_alpha() RETURNS integer AS ''SELECT %s'' LANGUAGE sql IMMUTABLE', alpha);
 END
 $$
 LANGUAGE plpgsql;
@@ -129,7 +129,7 @@ END$$;
 
 SELECT set_pvf(20);
 SELECT set_w(3);
-SELECT set_se(3);
+SELECT set_alpha(3);
 SELECT set_confidence_value(0.8);
 SELECT set_long_codes_threshold(10000000);
 SELECT set_method_flag(0);
@@ -572,13 +572,13 @@ DECLARE
 table_name varchar;
 formated varchar[];
 post_verif integer;
-se integer;
+alpha integer;
 method_flag integer;
 use_targetlist boolean;
 BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 EXECUTE 'SELECT get_pvf()' INTO post_verif;
-EXECUTE 'SELECT get_se()' INTO se;
+EXECUTE 'SELECT get_alpha()' INTO alpha;
 EXECUTE 'SELECT get_method_flag()' INTO method_flag;
 EXECUTE 'SELECT get_use_targetlist()' INTO use_targetlist;
 
@@ -595,7 +595,7 @@ FROM ivpq_search_in(
   ARRAY(SELECT id FROM %s WHERE word = ANY(''%s''::varchar(100)[])),
   %s, %s, %s, ''%s'')
   AS (qid integer, tid integer, distance float4) INNER JOIN %s AS f ON tid = f.id;
-', table_name, replace(token, '''', ''''''), k, table_name, formated, se, post_verif, method_flag, use_targetlist, table_name);
+', table_name, replace(token, '''', ''''''), k, table_name, formated, alpha, post_verif, method_flag, use_targetlist, table_name);
 END
 $$
 LANGUAGE plpgsql;
@@ -604,7 +604,7 @@ CREATE OR REPLACE FUNCTION knn_in_iv_batch(query_set varchar(100)[], k integer, 
 DECLARE
 table_name varchar;
 post_verif integer;
-se integer;
+alpha integer;
 method_flag integer;
 use_targetlist boolean;
 confidence float4;
@@ -618,7 +618,7 @@ rec RECORD;
 BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 EXECUTE 'SELECT get_pvf()' INTO post_verif;
-EXECUTE 'SELECT get_se()' INTO se;
+EXECUTE 'SELECT get_alpha()' INTO alpha;
 EXECUTE 'SELECT get_method_flag()' INTO method_flag;
 EXECUTE 'SELECT get_use_targetlist()' INTO use_targetlist;
 EXECUTE 'SELECT get_confidence_value()' INTO confidence;
@@ -639,7 +639,7 @@ END LOOP;
 RETURN QUERY EXECUTE format('
 SELECT f.word, g.word, (1.0 - (distance / 2.0))::float4 as similarity
 FROM %s(''%s''::bytea[], ''%s''::integer[], ''%s''::int, ARRAY(SELECT id FROM %s WHERE word = ANY(''%s''::varchar(100)[])), %s, %s, %s, ''%s'', %s, %s) AS (qid integer, tid integer, distance float4) INNER JOIN %s AS f ON qid = f.id INNER JOIN %s AS g ON tid = g.id;
-', function_name, vectors, ids, k, table_name, formated, se, post_verif, method_flag, use_targetlist, confidence, long_codes_threshold, table_name, table_name);
+', function_name, vectors, ids, k, table_name, formated, alpha, post_verif, method_flag, use_targetlist, confidence, long_codes_threshold, table_name, table_name);
 END
 $$
 LANGUAGE plpgsql;

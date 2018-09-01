@@ -239,17 +239,22 @@ inline void addToTargetList(TargetListElem* targetLists, int queryVectorsIndex,
                             const int target_lists_size, const int method,
                             int16* codes, float4* vector, int wordId) {
   TargetListElem* currentTargetList = targetLists[queryVectorsIndex].last;
-  currentTargetList->codes[currentTargetList->size] = codes;
+  if (method != EXACT_CALC) {
+    currentTargetList->codes[currentTargetList->size] = codes;
+  }
   currentTargetList->ids[currentTargetList->size] = wordId;
-  if (method == PQ_PV_CALC) {
+  if ((method == PQ_PV_CALC) || (method == EXACT_CALC)) {
     currentTargetList->vectors[currentTargetList->size] = vector;
   }
   currentTargetList->size += 1;
   if (currentTargetList->size == target_lists_size) {
     currentTargetList->next = palloc(sizeof(TargetListElem));
-    currentTargetList->next->codes = palloc(sizeof(int16*) * target_lists_size);
+    if (method != EXACT_CALC) {
+      currentTargetList->next->codes =
+          palloc(sizeof(int16*) * target_lists_size);
+    }
     currentTargetList->next->ids = palloc(sizeof(int) * target_lists_size);
-    if (method == PQ_PV_CALC) {
+    if ((method == PQ_PV_CALC) || (method == EXACT_CALC)) {
       currentTargetList->next->vectors =
           palloc(sizeof(float4*) * target_lists_size);
     }
