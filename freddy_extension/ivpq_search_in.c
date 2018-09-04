@@ -551,7 +551,7 @@ Datum ivpq_search_in(PG_FUNCTION_ARGS) {
           for (i = 0; i < queryVectorsIndicesSize; i++) {
             int queryVectorsIndex = queryVectorsIndices[i];
             TargetListElem *current = &targetLists[queryVectorsIndex];
-            if (targetCounts[queryVectorsIndex] < k * alpha_original) {
+            if ((targetCounts[queryVectorsIndex] < k * alpha_original) && !lastIteration) {
               targetCounts[queryVectorsIndex] = 0;
               continue;
             }
