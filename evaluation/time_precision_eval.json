@@ -1,0 +1,12 @@
+{
+	"number_of_query_samples":  10000,
+	"number_of_target_samples":  100000,
+	"num_iters":  5	,
+	"k":  5,
+	"pvf":  1,
+	"alphas": [50, 100, 150, 200],
+	"vecs_table_name": "google_vecs_norm",
+  "steps": 5,
+	"step_size": 3,
+  "small_sample_size": 20
+}
