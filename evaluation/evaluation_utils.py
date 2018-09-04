@@ -153,19 +153,6 @@ def batch_measurement_simple(cur, con, query_set, k, samples):
         for i, key in enumerate(samples):
             responses[name][i] = [(t,) for (q, t, dist) in result if q == key]
 
-        #
-        # print('Start Test for', name)
-        # for i, sample in enumerate(samples):
-        #     # vector = serialize_vector(sample)
-        #     rendered_query = query.format("'" + samples[i].replace("'", "''") + "'", k)
-        #     start = time.time()
-        #     cur.execute(rendered_query)
-        #     result = cur.fetchall()
-        #     end = time.time()
-        #     responses[name][i] = result
-        #     time_values[name].append((end-start))
-        #     count += 1
-        #     print('Iteration', count, 'completed')
     return time_values, responses
 
 def batch_measurement_simple_targets(cur, con, query_set, k, samples, targets):
@@ -178,7 +165,6 @@ def batch_measurement_simple_targets(cur, con, query_set, k, samples, targets):
         sample_array = "'{" + ','.join([samples[i].replace("'", "''") for i in range(len(samples))]) + "}'"
         target_array = "'{" + ','.join([targets[i].replace("'", "''") for i in range(len(targets))]) + "}'"
         rendered_query = query.format(sample_array, k, target_array)
-        # print('query:',rendered_query)
         start = time.time()
         cur.execute(rendered_query)
         result = cur.fetchall()
@@ -253,25 +239,12 @@ def calculate_precision(responses, exact, threshold=5):
 
 def plot_bars(measured_data, iplot=False, layout=None):
     data = []
-    # for i, key in enumerate(measured_data.keys()):
-        # trace = go.Scatter(
-        #     name=key,
-        #     y=measured_data[key],
-        #     x=[i]*len(measured_data[key])
-        # )
     data = [go.Bar(
             x=list(measured_data.keys()),
             y=[np.mean(measured_data[x]) for x in measured_data.keys()],
             text=[np.mean(measured_data[x]) for x in measured_data.keys()],
             textposition = 'outside',
             textfont=dict(family='Arial', size=20),
-            # marker=dict(
-            #     # color='rgb(0,0,0)',
-            #     size=20,
-            #     line=dict(
-            #         color='rgb(0,0,0)',
-            #         width=0),
-            # ),
     )]
     if layout == None:
         layout = go.Layout(yaxis= dict(title='time in seconds', titlefont=dict(size=30), tickfont=dict(size=30)), xaxis=dict(titlefont=dict(size=30), tickfont=dict(size=30)))
