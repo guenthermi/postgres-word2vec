@@ -2,7 +2,7 @@
 \echo Use "CREATE EXTENSION freddy" to load this file. \quit
 
 -- TODO line breaks
-CREATE OR REPLACE FUNCTION init(original regclass, normalized regclass, pq_quantization regclass, codebook regclass, residual_quantization regclass, coarse_quantization regclass, residual_codebook regclass, ivpq_quantization regclass) RETURNS void AS $$
+CREATE OR REPLACE FUNCTION init(original regclass, normalized regclass, pq_quantization regclass, codebook regclass, residual_quantization regclass, coarse_quantization regclass, residual_codebook regclass, ivpq_quantization regclass, coarse_quantization_multi regclass) RETURNS void AS $$
 BEGIN
 EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name_original() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', original);
 EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', normalized);
@@ -10,6 +10,7 @@ EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name_pq_quantization() RETUR
 EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name_codebook() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', codebook);
 EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name_residual_quantization() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', residual_quantization);
 EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name_coarse_quantization() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', coarse_quantization);
+EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name_coarse_quantization_multi() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', coarse_quantization_multi);
 EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name_residual_codebook() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', residual_codebook);
 EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name_ivpq_quantization() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', ivpq_quantization);
 END
@@ -94,6 +95,13 @@ END
 $$
 LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION set_knn_join_function(name varchar) RETURNS void AS $$
+BEGIN
+EXECUTE format('CREATE OR REPLACE FUNCTION get_knn_join_function_name() RETURNS varchar AS ''SELECT varchar ''''%s'''''' LANGUAGE sql IMMUTABLE', name);
+END
+$$
+LANGUAGE plpgsql;
+
 CREATE OR REPLACE FUNCTION set_analogy_function(name varchar) RETURNS void AS $$
 BEGIN
 EXECUTE format('CREATE OR REPLACE FUNCTION get_analogy_function_name() RETURNS varchar AS ''SELECT varchar ''''%s'''''' LANGUAGE sql IMMUTABLE', name);
@@ -122,8 +130,8 @@ number_tables int;
 BEGIN
 EXECUTE 'SELECT count(proname) FROM pg_proc WHERE proname=''get_vecs_name''' INTO init_done;
 EXECUTE 'SELECT count(*) FROM information_schema.tables WHERE table_schema=''public'' AND table_type=''BASE TABLE'' AND table_name in (''google_vecs'', ''google_vecs_norm'', ''pq_quantization'', ''pq_codebook'', ''fine_quantization'', ''coarse_quantization'', ''residual_codebook'', ''ivpq_quantization'')' INTO number_tables;
-IF init_done = 0 AND number_tables = 8 THEN
-  EXECUTE 'SELECT init(''google_vecs'', ''google_vecs_norm'', ''pq_quantization'', ''pq_codebook'', ''fine_quantization'', ''coarse_quantization'', ''residual_codebook'', ''ivpq_quantization'')';
+IF init_done = 0 AND number_tables = 9 THEN
+  EXECUTE 'SELECT init(''google_vecs'', ''google_vecs_norm'', ''pq_quantization'', ''pq_codebook'', ''fine_quantization'', ''coarse_quantization'', ''residual_codebook'', ''ivpq_quantization'', ''coarse_quantization_ivpq'')';
 END IF;
 END$$;
 
@@ -140,6 +148,7 @@ SELECT set_knn_batch_function('k_nearest_neighbour_ivfadc_batch');
 SELECT set_analogy_function('analogy_3cosadd');
 SELECT set_analogy_in_function('analogy_3cosadd_in');
 SELECT set_groups_function('grouping_func');
+SELECT set_knn_join_function('knn_in_ivpq_batch');
 
 CREATE OR REPLACE FUNCTION create_statistics(table_name varchar, column_name varchar, coarse_table_name varchar)  RETURNS void AS $$
 DECLARE
@@ -207,6 +216,27 @@ SELECT * FROM %s(''%s'', %s)
 END
 $$
 LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION knn_join(query_set varchar(100)[], k integer, target_set varchar(100)[]) RETURNS TABLE (query varchar(100), target varchar(100), squareDistance float4) AS $$
+DECLARE
+function_name varchar;
+formated varchar[];
+formated_targets varchar[];
+BEGIN
+FOR I IN array_lower(query_set, 1)..array_upper(query_set, 1) LOOP
+  formated[I] = replace(query_set[I], '''', '''''');
+END LOOP;
+FOR I IN array_lower(target_set, 1)..array_upper(target_set, 1) LOOP
+  formated_targets[I] = replace(target_set[I], '''', '''''');
+END LOOP;
+EXECUTE 'SELECT get_knn_join_function_name()' INTO function_name;
+RETURN QUERY EXECUTE format('
+SELECT * FROM %s(''%s''::varchar(100)[], %s,  ''%s''::varchar(100)[])
+', function_name, formated, k, formated_targets);
+END
+$$
+LANGUAGE plpgsql;
+
 
 CREATE OR REPLACE FUNCTION analogy(a varchar(100),b varchar(100),c varchar(100), OUT result varchar(100)) AS $$
 DECLARE
@@ -649,7 +679,6 @@ DECLARE
 formated varchar[];
 formated_queries varchar[];
 BEGIN
-RAISE NOTICE 'get here';
 FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
   formated[I] = replace(input_set[I], '''', '''''');
 END LOOP;

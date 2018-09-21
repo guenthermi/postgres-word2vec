@@ -221,7 +221,7 @@ Datum ivpq_search_in(PG_FUNCTION_ARGS) {
     }
 // get coarse quantizer
 #ifdef USE_MULTI_COARSE
-    getTableName(COARSE_QUANTIZATION, tableNameCQ, 100);
+    getTableName(COARSE_QUANTIZATION_MULTI, tableNameCQ, 100);
     cqMulti = getCodebook(tableNameCQ);
     cqSize = pow(cqMulti.codeSize, cqMulti.positions);
 #endif

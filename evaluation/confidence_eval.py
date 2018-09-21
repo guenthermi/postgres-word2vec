@@ -55,7 +55,10 @@ trace = go.Scatter(
     x = x_axis,
     y = quotes,
     mode = 'markers+lines',
-    name = 'target_counts'
+    name = 'target_counts',
+    marker = {
+        'size': 10
+    }
 )
 
 layout = go.Layout(

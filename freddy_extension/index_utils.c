@@ -1,5 +1,5 @@
 
-#define LOG_TARGET_COUNTS
+//#define LOG_TARGET_COUNTS
 
 // clang-format off
 
@@ -820,6 +820,7 @@ void getTableName(tableType type, char* name, int bufferSize) {
                                   "get_vecs_name_coarse_quantization()",
                                   "get_vecs_name_residual_codebook()",
                                   "get_vecs_name_ivpq_quantization()",
+                                  "get_vecs_name_coarse_quantization_multi()",
                                   "get_statistics_table()"};
 
   SPI_connect();

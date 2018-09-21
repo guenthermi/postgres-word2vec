@@ -83,43 +83,71 @@ trace0 = go.Scatter(
     x = dynamic_sizes,
     y = [calculate_time(t['precomputation_time']) for t in trackings],
     mode = 'lines+markers',
-    name = 'precomputation_time'
+    name = 'precomputation',
+    marker = {
+        'size': 10,
+        'symbol': 'square-open'
+    }
 )
 trace1 = go.Scatter(
     x = dynamic_sizes,
     y = [calculate_time(t['query_construction_time']) for t in trackings],
     mode = 'lines+markers',
-    name = 'query_construction_time'
+    name = 'query construction',
+    marker = {
+        'size': 10,
+        'symbol': 'circle-open'
+    }
 )
 trace2 = go.Scatter(
     x = dynamic_sizes,
     y = [calculate_time(t['data_retrieval_time']) for t in trackings],
     mode = 'lines+markers',
-    name = 'data_retrieval_time'
+    name = 'data retrieval',
+    marker = {
+        'size': 10,
+        'symbol': 'triangle-open'
+    }
 )
 trace3 = go.Scatter(
     x = dynamic_sizes,
     y = [calculate_time(t['computation_time']) for t in trackings],
     mode = 'lines+markers',
-    name = 'computation_time'
+    name = 'distance computation',
+    marker = {
+        'size': 10,
+        'symbol': 'asterisk-open'
+    }
 )
 trace4 = go.Scatter(
     x = dynamic_sizes,
     y = [mean([float(x[0][0]) for x in t['total_time']]) for t in trackings],
     mode = 'lines+markers',
-    name = 'inner_execution_time'
+    name = 'inner execution time',
+    marker = {
+        'size': 10,
+        'symbol': 'triangle-open'
+    }
 )
 trace5 = go.Scatter(
     x = dynamic_sizes,
     y = [sum([calculate_time(t[k]) for k in t.keys()])/(s/10) for (t,s) in zip(trackings,dynamic_sizes)],
     mode = 'lines+markers',
-    name = 'relative*10^-100'
+    name = 'relative*10^-100',
+    marker = {
+        'size': 10,
+        'symbol': 'square-open'
+    }
 )
 trace6 = go.Scatter(
     x = dynamic_sizes,
     y = execution_times,
     mode = 'lines+markers',
-    name = 'complete_time'
+    name = 'complete_time',
+    marker = {
+        'size': 10,
+        'symbol': 'circle-open'
+    }
 )
 
 layout = go.Layout(

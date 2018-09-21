@@ -72,10 +72,10 @@ trace = go.Scatter(
     }
 )
 
-regression = np.polyfit(real, divergence, 4)
+regression = np.polyfit(prediction, divergence, 4)
 regression_func = np.poly1d(regression)
 trace_divergence = go.Scatter(
-    x = real,
+    x = prediction,
     y = divergence,
     mode = 'markers',
     name = 'divergence',
@@ -87,6 +87,7 @@ trace_divergence_regression = go.Scatter(
     x = [5*i for i in range(int(number_of_target_samples/5))],
     y = [regression_func(5*i) for i in range(int(number_of_target_samples/5))],
     mode = 'lines',
+    line = {'width':4},
     name = 'divergence'
 )
 
@@ -119,7 +120,7 @@ layout = go.Layout(
     height = 750,
     showlegend = False,
     xaxis=dict(
-        title=('Real Value'),
+        title=('Prediction'),
         titlefont=dict(size=30),
         tickfont=dict(size=20),
         # domain= [0, 0.45],

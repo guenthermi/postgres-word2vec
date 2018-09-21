@@ -90,13 +90,23 @@ trace_total0 = go.Scatter(
     x = dynamic_sizes,
     y = short_codes_times['total_time'],
     mode = 'lines+markers',
-    name = 'Short Codes'
+    name = 'Short Codes',
+    marker = {
+        'color':'rgba(0, 0, 200, 1)',
+        'symbol': 'circle-open',
+        'size': 10
+    }
 )
 trace_total1 = go.Scatter(
     x = dynamic_sizes,
     y = long_codes_times['total_time'],
     mode = 'lines+markers',
-    name = 'Long Codes'
+    name = 'Long Codes',
+    marker = {
+        'color':'rgba(200, 0, 0, 1)',
+        'symbol': 'circle-open',
+        'size': 10
+    }
 )
 
 trace_parts0 = go.Scatter(
@@ -105,7 +115,7 @@ trace_parts0 = go.Scatter(
     mode = 'lines+markers',
     name = 'Short Codes Precomputation',
     marker = {
-        'color':'rgba(200, 0, 0, 1)',
+        'color':'rgba(0, 0, 200, 1)',
         'symbol': 'circle-open',
         'size': 10
     }
@@ -117,7 +127,7 @@ trace_parts1 = go.Scatter(
     name = 'Short Codes Distance Computation',
     marker = {
         'color':'rgba(0, 0, 200, 1)',
-        'symbol':'circle-open',
+        'symbol':'square-open',
         'size': 10
     }
 )
@@ -128,7 +138,7 @@ trace_parts2 = go.Scatter(
     name = 'Long Codes Precomputation',
     marker = {
         'color':'rgba(200, 0, 0, 1)',
-        'symbol':'square-open',
+        'symbol':'circle-open',
         'size': 10
     }
 )
@@ -138,7 +148,7 @@ trace_parts3 = go.Scatter(
     mode = 'lines+markers',
     name = 'Long Codes Distance Computation',
     marker = {
-        'color':'rgba(0, 0, 200, 1)',
+        'color':'rgba(200, 0, 0, 1)',
         'symbol':'square-open',
         'size': 10
     }

@@ -52,6 +52,17 @@ SELECT * FROM
 top_k_in_pq('Godfather', 5, ARRAY(SELECT title FROM movies));
 ```
 
+### K Nearest Neighbour Join Queries
+
+```
+top_k_in_pq(varchar[], int, varchar[]);
+```
+**Example**
+```
+SELECT *
+FROM knn_join(ARRAY(SELECT title FROM movies), 5, ARRAY(SELECT title FROM movies));
+```
+
 ### Grouping
 
 ```
@@ -66,7 +77,9 @@ FROM grouping_func(ARRAY(SELECT title FROM movies), '{Europe,America}');
 ## Indexes
 
 We implemented two types of index structures to accelerate word embedding operations. One index is based on [product quantization](http://ieeexplore.ieee.org/abstract/document/5432202/) and one on IVFADC (inverted file system with asymmetric distance calculation). Product quantization provides a fast approximated distance calculation. IVFADC is even faster and provides a non-exhaustive approach which also uses product quantization.
+In addition to that, an inverted product quantization index for kNN-Join operations can be created.
 
+### Evaluation of PQ and IVFADC
 | Method                           | Response Time | Precision     |
 | ---------------------------------| ------------- | ------------- |
 | Exact Search                     | 8.79s         | 1.0           |
@@ -112,6 +125,17 @@ The response time per query in dependence of the batch size is shown below.
 
  ![batch queries](evaluation/batch_queries.png)
 
+## Evaluation of kNN-Join
+
+ ![kNN Join Evaluation](evaluation/kNN_join.png)
+
+ **Parameters:**
+ Query Vector Size: TODO
+ Target Vector Size: TODO
+ K: TODO
+ Alpha: TODO
+ PVF-Values: TODO
+
 ## Setup
 At first, you need to set up a [Postgres server](https://www.postgresql.org/). You have to install [faiss](https://github.com/facebookresearch/faiss) and a few other python libraries to run the import scripts.
 
@@ -150,13 +174,33 @@ The IVFADC index tables can be created with "ivfadc.py":
 python3 ivfadc.py config/ivfadc_config.json
 ```
 
-After all index tables are created, you might execute `CREATE EXTENSION freddy;` a second time. To provide the table names of the index structures for the extension you can use the `init` function in the PSQL console (If you used the default names this might not be necessary) Replace the default names with the names defined in the JSON configuration files:
+For the kNN-Join operation, an index structure can be created with "ivpq.py":
 
 ```
-SELECT init('google_vecs', 'google_vecs_norm', 'pq_quantization', 'pq_codebook', 'fine_quantization', 'coarse_quantization', 'residual_codebook')
+python3 ivpq.py config/ivpq_config.json
+```
+
+**Statistics:**
+In addition to the index structures, the kNN-Join operation uses statistics about the distribution of the index vectors over index partitions.
+This statistical information is essential for the search operation.
+For the `word` column of the `google_vecs_norm` table (table with normalized word vectors) statistics can be created by the following SQL command:
+```
+SELECT create_statistics('google_vecs_norm', 'word', 'coarse_quantization_ivpq')
+```
+This will produce a table `stat_google_vecs_norm_word` with statistic information.
+In addition to that, one can create statistics for other text columns in the database which can improve the performance of the kNN-Join operation.
+The statistic table used by the operation can be select by the `set_statistics_table` function:
+```
+SELECT set_statistics_table('stat_google_vecs_norm_word')
+```
+After all index tables are created, you might execute `CREATE EXTENSION freddy;` a second time. To provide the table names of the index structures for the extension, you can use the `init` function in the PSQL console (If you used the default names this might not be necessary) Replace the default names with the names defined in the JSON configuration files:
+
+```
+SELECT init('google_vecs', 'google_vecs_norm', 'pq_quantization', 'pq_codebook', 'fine_quantization', 'coarse_quantization', 'residual_codebook', 'fine_quantization_ivpq', 'coarse_quantization_ivpq')
 ```
 
 ## Store and load index files
+**(Deprecated: use pg_dump to export index tables)**
 
 The index creation scripts "pq_index.py" and "ivfadc.py" are able to store index structures into binary files. To enable the generation of these binary files, change the `export_to_file` flag in the JSON config file to `true` and define an output destination by setting `export_name` to the export path.
 
@@ -164,4 +208,17 @@ To load an index file into the database you have to use the "load_index.py" scri
 
 ```
 python3 load_index.py dump.idx pq pq_config.json
+```
+
+## References
+[FREDDY: Fast Word Embeddings in Database Systems](https://dl.acm.org/citation.cfm?id=3183717)
+```
+@inproceedings{gunther2018freddy,
+  title={FREDDY: Fast Word Embeddings in Database Systems},
+  author={G{\"u}nther, Michael},
+  booktitle={Proceedings of the 2018 International Conference on Management of Data},
+  pages={1817--1819},
+  year={2018},
+  organization={ACM}
+}
 ```

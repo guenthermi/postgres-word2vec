@@ -227,7 +227,7 @@ Datum ivfadc_search(PG_FUNCTION_ARGS) {
     start = clock();
 
     getTableName(NORMALIZED, tableName, 100);
-    getTableName(RESIDUAL_CODBOOK, tableNameResidualCodebook, 100);
+    getTableName(RESIDUAL_CODEBOOK, tableNameResidualCodebook, 100);
     getTableName(RESIDUAL_QUANTIZATION, tableNameFineQuantization, 100);
     getParameter(PARAM_W, &param_w);
 
@@ -743,7 +743,7 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS) {
     start = clock();
 
     getTableName(NORMALIZED, tableName, 100);
-    getTableName(RESIDUAL_CODBOOK, tableNameResidualCodebook, 100);
+    getTableName(RESIDUAL_CODEBOOK, tableNameResidualCodebook, 100);
     getTableName(RESIDUAL_QUANTIZATION, tableNameFineQuantization, 100);
 
     funcctx = SRF_FIRSTCALL_INIT();
@@ -1740,7 +1740,7 @@ Datum insert_batch(PG_FUNCTION_ARGS) {
   getTableName(CODEBOOK, tableNameCodebook, 100);
   getTableName(PQ_QUANTIZATION, pqQuantizationTable, 100);
 
-  getTableName(RESIDUAL_CODBOOK, tableNameResidualCodebook, 100);
+  getTableName(RESIDUAL_CODEBOOK, tableNameResidualCodebook, 100);
   getTableName(RESIDUAL_QUANTIZATION, tableNameFineQuantization, 100);
 
   getTableName(NORMALIZED, tableNameNormalized, 100);
