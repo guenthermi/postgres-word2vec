@@ -196,7 +196,7 @@ SELECT set_statistics_table('stat_google_vecs_norm_word')
 After all index tables are created, you might execute `CREATE EXTENSION freddy;` a second time. To provide the table names of the index structures for the extension, you can use the `init` function in the PSQL console (If you used the default names this might not be necessary) Replace the default names with the names defined in the JSON configuration files:
 
 ```
-SELECT init('google_vecs', 'google_vecs_norm', 'pq_quantization', 'pq_codebook', 'fine_quantization', 'coarse_quantization', 'residual_codebook', 'fine_quantization_ivpq', 'coarse_quantization_ivpq')
+SELECT init('google_vecs', 'google_vecs_norm', 'pq_quantization', 'pq_codebook', 'fine_quantization', 'coarse_quantization', 'residual_codebook', 'fine_quantization_ivpq', 'codebook_ivpq', 'coarse_quantization_ivpq')
 ```
 
 ## Store and load index files

@@ -159,7 +159,7 @@ Datum ivpq_search_in(PG_FUNCTION_ARGS) {
     last = clock();
 
     getTableName(NORMALIZED, tableName, 100);
-    getTableName(CODEBOOK, tableNameCodebook, 100);
+    getTableName(IVPQ_CODEBOOK, tableNameCodebook, 100);
     getTableName(IVPQ_QUANTIZATION, tableNameFineQuantizationIVPQ, 100);
 
     funcctx = SRF_FIRSTCALL_INIT();
