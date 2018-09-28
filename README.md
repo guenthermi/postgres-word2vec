@@ -141,15 +141,15 @@ SELECT set_alpha(100);
 ```
 
 ## Evaluation of kNN-Join
-An Evaluation of the kNN-Join performance you can see here.
+An Evaluation of the kNN-Join performance you can see here. The baseline in the diagram is a kNN-Join based on product quantization search which is implemented in the `pq_search_in_batch` function.
 
  ![kNN Join Evaluation](evaluation/time_precision_eval_gn.png)
 
  **Parameters:**
- Query Vector Size: 5,000
- Target Vector Size: 100,000
- K: 5
- PVF-Values: 10, 20, ..., 100
+ Query Vector Size: 5,000  
+ Target Vector Size: 100,000  
+ K: 5  
+ PVF-Values: 10, 20, ..., 100  
 
 ## Setup
 At first, you need to set up a [Postgres server](https://www.postgresql.org/). You have to install [faiss](https://github.com/facebookresearch/faiss) and a few other python libraries to run the import scripts.
