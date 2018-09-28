@@ -409,9 +409,9 @@ bool determineCoarseIdsMultiWithStatisticsMulti(
       }
       cqIds[queryIndex] = palloc(sizeof(int) * max_coarse_order);
       memcpy(cqIds[queryIndex], currentCqIds, max_coarse_order * sizeof(int));
-      #ifdef LOG_TARGET_COUNTS
-      elog(INFO, "TRACK target_count %f", prob*inputIdsSize); // to get
-      #endif
+#ifdef LOG_TARGET_COUNTS
+      elog(INFO, "TRACK target_count %f", prob * inputIdsSize);  // to get
+#endif
       // statistics
     } else {
       while ((getConfidenceHyp(minTargetCount, inputIdsSize, prob,

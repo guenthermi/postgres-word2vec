@@ -125,16 +125,31 @@ The response time per query in dependence of the batch size is shown below.
 
  ![batch queries](evaluation/batch_queries.png)
 
-## Evaluation of kNN-Join
+## Parameters of the kNN-Join operation
+Precision and execution time of the kNN-Join operation depend on the parameters `alpha` and `pvf`.
+The selectivity `alpha` determine the factor of pre-filtering. Higher values correspond to higher execution time and higher precision.
+The kNN-Join can also use post verification which is configurable by the post verification factor `pvf`.
+To enable post verification one has to set the method flag (0: approximated distance calculation; 1: exact distance calculation; 2: post verification)
+This can be done as follows:
+```
+SELECT set_method_flag(2);
+```
+The parameters `alpha` and `pvf` can be set in a similar way:
+```
+SELECT set_pvf(20);
+SELECT set_alpha(100);
+```
 
- ![kNN Join Evaluation](evaluation/kNN_join.png)
+## Evaluation of kNN-Join
+An Evaluation of the kNN-Join performance you can see here.
+
+ ![kNN Join Evaluation](evaluation/time_precision_eval_gn.png)
 
  **Parameters:**
- Query Vector Size: TODO
- Target Vector Size: TODO
- K: TODO
- Alpha: TODO
- PVF-Values: TODO
+ Query Vector Size: 5,000
+ Target Vector Size: 100,000
+ K: 5
+ PVF-Values: 10, 20, ..., 100
 
 ## Setup
 At first, you need to set up a [Postgres server](https://www.postgresql.org/). You have to install [faiss](https://github.com/facebookresearch/faiss) and a few other python libraries to run the import scripts.
@@ -197,17 +212,6 @@ After all index tables are created, you might execute `CREATE EXTENSION freddy;`
 
 ```
 SELECT init('google_vecs', 'google_vecs_norm', 'pq_quantization', 'pq_codebook', 'fine_quantization', 'coarse_quantization', 'residual_codebook', 'fine_quantization_ivpq', 'codebook_ivpq', 'coarse_quantization_ivpq')
-```
-
-## Store and load index files
-**(Deprecated: use pg_dump to export index tables)**
-
-The index creation scripts "pq_index.py" and "ivfadc.py" are able to store index structures into binary files. To enable the generation of these binary files, change the `export_to_file` flag in the JSON config file to `true` and define an output destination by setting `export_name` to the export path.
-
-To load an index file into the database you have to use the "load_index.py" script. The script requires an index file, the type of the index (either "pq" or "ivfadc") and the JSON file for the index configuration (same file as used for creating an index). Use the following command to create a product quantization index stored in a "dump.idx" file:
-
-```
-python3 load_index.py dump.idx pq pq_config.json
 ```
 
 ## References
