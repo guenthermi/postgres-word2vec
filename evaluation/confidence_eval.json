@@ -1,0 +1,11 @@
+{
+	"number_of_query_samples":  100,
+	"number_of_target_samples":  1000,
+	"num_iters":  20,
+	"k":  5,
+	"pvf":  1,
+	"alpha": 10,
+	"method":  1,
+	"vecs_table_name": "google_vecs_norm",
+	"step_size": 0.05
+}
