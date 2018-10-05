@@ -1690,6 +1690,7 @@ Datum grouping_pq(PG_FUNCTION_ARGS) {
 PG_FUNCTION_INFO_V1(insert_batch);
 
 Datum insert_batch(PG_FUNCTION_ARGS) {
+  const float MAX_DIST = 1000.0;
   int n;
 
   Datum* termsData;
@@ -1715,6 +1716,14 @@ Datum insert_batch(PG_FUNCTION_ARGS) {
   int** nearestCentroids;
   int* countIncs;
 
+  CodebookWithCounts ivpqCb;
+  int cbIvPositions = 0;
+  int cbIvCodes = 0;
+  int ivSubvectorSize;
+
+  int** nearestCentroidsIvpq;
+  int* ivCountIncs;
+
   int* cqQuantizations;
   float* nearestCoarseCentroidRaw;
   float** residuals;
@@ -1723,11 +1732,16 @@ Datum insert_batch(PG_FUNCTION_ARGS) {
   int cbrPositions = 0;
   int cbrCodes = 0;
   int residualSubvectorSize;
-  CoarseQuantizer cq;
-  int cqSize;
+
   int** nearestResidualCentroids;
   int* residualCountIncs;
+
+  CoarseQuantizer cq;
+  int cqSize;
   float minDistCoarse;
+
+  CodebookCompound cqMulti;
+  int* cqQuantizationMulti;
 
   char* tableNameCodebook = palloc(sizeof(char) * 100);
   char* pqQuantizationTable = palloc(sizeof(char) * 100);
@@ -1737,6 +1751,10 @@ Datum insert_batch(PG_FUNCTION_ARGS) {
   char* tableNameNormalized = palloc(sizeof(char) * 100);
   char* tableNameOriginal = palloc(sizeof(char) * 100);
 
+  char* ivpqQuantizationTable = palloc(sizeof(char) * 100);
+  char* ivpqCodebook = palloc(sizeof(char) * 100);
+  char* tableNameCQMulti = palloc(sizeof(char) * 100);
+
   getTableName(CODEBOOK, tableNameCodebook, 100);
   getTableName(PQ_QUANTIZATION, pqQuantizationTable, 100);
 
@@ -1745,6 +1763,10 @@ Datum insert_batch(PG_FUNCTION_ARGS) {
 
   getTableName(NORMALIZED, tableNameNormalized, 100);
   getTableName(ORIGINAL, tableNameOriginal, 100);
+
+  getTableName(IVPQ_QUANTIZATION, ivpqQuantizationTable, 100);
+  getTableName(IVPQ_CODEBOOK, ivpqCodebook, 100);
+  getTableName(COARSE_QUANTIZATION_MULTI, tableNameCQMulti, 100);
 
   // get terms from arguments
   getArray(PG_GETARG_ARRAYTYPE_P(0), &termsData, &n);
@@ -1822,6 +1844,12 @@ Datum insert_batch(PG_FUNCTION_ARGS) {
   // get residual codebook
   residualCb = getCodebookWithCounts(&cbrPositions, &cbrCodes,
                                      tableNameResidualCodebook);
+  // get ivpq codebook
+  ivpqCb = getCodebookWithCounts(&cbIvPositions, &cbIvCodes, ivpqCodebook);
+
+  // get codebook for multi index coarse quantizer (ivpq)
+  cqMulti = getCodebook(tableNameCQMulti);
+
   // get coarse quantizer
   cq = getCoarseQuantizer(&cqSize);
   // determine coarse quantization and residuals
@@ -1844,21 +1872,49 @@ Datum insert_batch(PG_FUNCTION_ARGS) {
       residuals[i][j] = rawVectors[i][j] - nearestCoarseCentroidRaw[j];
     }
   }
-  // determine nearest centroids (quantization)
+
+  // determine coarse quantizaiton multi index (ivpq)
+  cqQuantizationMulti = palloc(sizeof(int) * rawVectorsSize);
+  for (int i = 0; i < rawVectorsSize; i++){
+    int factor = 1;
+    cqQuantizationMulti[i] = 0;
+    for (int pos = 0; pos < cqMulti.positions; pos++) {
+      float minDist = MAX_DIST; // sufficient high value
+      int subdim = vectorSize / cqMulti.positions;
+      int coarseId = 0;
+      for (int j = 0; j < cqMulti.codeSize; j++) {
+        float dist = squareDistance(rawVectors[i] + (pos * subdim),
+                              cqMulti.codebook[j + pos * cqMulti.codeSize].vector, subdim);
+        if (dist < minDist){
+          coarseId = j;
+          minDist = dist;
+        }
+      }
+      cqQuantizationMulti[i] += factor *  coarseId;
+      factor *= cqMulti.positions;
+    }
+  }
+
+  // determine nearest centroids (quantization) and update codebook
   nearestCentroids = palloc(sizeof(int*) * rawVectorsSize);
   countIncs = palloc(cbPositions * cbCodes * sizeof(int));
   subvectorSize = vectorSize / cbPositions;
-
   updateCodebook(rawVectors, rawVectorsSize, subvectorSize, cb, cbPositions,
                  cbCodes, nearestCentroids, countIncs);
 
+  // determine nearest centroids (quantization) of residuals and update residual codebook
   nearestResidualCentroids = palloc(sizeof(int*) * rawVectorsSize);
-  residualSubvectorSize = vectorSize / cbrPositions;
   residualCountIncs = palloc(cbrPositions * cbrCodes * sizeof(int));
+  residualSubvectorSize = vectorSize / cbrPositions;
   updateCodebook(residuals, rawVectorsSize, residualSubvectorSize, residualCb,
                  cbrPositions, cbrCodes, nearestResidualCentroids,
                  residualCountIncs);
 
+  // determine nearest centroids (quantization) for ivpq and update codebook (ivpq)
+  nearestCentroidsIvpq = palloc(sizeof(int*) * rawVectorsSize);
+  ivCountIncs = palloc(cbrPositions * cbrCodes * sizeof(int));
+  ivSubvectorSize = vectorSize / cbIvPositions;
+  updateCodebook(rawVectors, rawVectorsSize, ivSubvectorSize, ivpqCb, cbIvPositions, cbIvCodes, nearestCentroidsIvpq, ivCountIncs);
   // insert new terms + quantinzation
   updateProductQuantizationRelation(nearestCentroids, tokens, cbPositions, cb,
                                     pqQuantizationTable, rawVectorsSize, NULL);
@@ -1866,6 +1922,10 @@ Datum insert_batch(PG_FUNCTION_ARGS) {
   updateProductQuantizationRelation(
       nearestResidualCentroids, tokens, cbrPositions, residualCb,
       tableNameFineQuantization, rawVectorsSize, cqQuantizations);
+
+  // insert new terms + quantization for ivpq search
+  updateProductQuantizationRelation(nearestCentroidsIvpq, NULL, cbIvPositions, ivpqCb, ivpqQuantizationTable, rawVectorsSize, cqQuantizationMulti);
+
   // update codebook relation
   updateCodebookRelation(cb, cbPositions, cbCodes, tableNameCodebook, countIncs,
                          subvectorSize);
@@ -1873,6 +1933,8 @@ Datum insert_batch(PG_FUNCTION_ARGS) {
   updateCodebookRelation(residualCb, cbrPositions, cbrCodes,
                          tableNameResidualCodebook, residualCountIncs,
                          residualSubvectorSize);
+  // update ivpq codebook relation
+  updateCodebookRelation(ivpqCb, cbIvPositions, cbIvCodes, ivpqCodebook, ivCountIncs, ivSubvectorSize);
 
   updateWordVectorsRelation(tableNameNormalized, tokens, rawVectors,
                             rawVectorsSize, vectorSize);

@@ -999,6 +999,7 @@ void updateProductQuantizationRelation(int** nearestCentroids, char** tokens,
   int ret;
   const char* schema_pq_quantization = "(id, word, vector)";
   const char* schema_fine_quantization = "(id, coarse_id, word, vector)";
+  const char* schema_ivpq_quantization = "(id, coarse_id, vector)";
 
   for (int i = 0; i < rawVectorsSize; i++) {
     command = palloc(sizeof(char) * (100 + cbPositions * 6 + 200));
@@ -1008,7 +1009,14 @@ void updateProductQuantizationRelation(int** nearestCentroids, char** tokens,
           cur, "INSERT INTO %s %s VALUES ((SELECT max(id) + 1 FROM %s), ",
           pqQuantizationTable, schema_pq_quantization, pqQuantizationTable);
       cur += sprintf(cur, "'%s', vec_to_bytea('{", tokens[i]);
-    } else {
+    }
+    if (tokens == NULL){
+      cur += sprintf(
+          cur, "INSERT INTO %s %s VALUES ((SELECT max(id) + 1 FROM %s), ",
+          pqQuantizationTable, schema_ivpq_quantization, pqQuantizationTable);
+      cur += sprintf(cur, "%d, vec_to_bytea('{", cqQuantizations[i]);
+    }
+    if ((tokens != NULL) && (cqQuantizations != NULL)){
       cur += sprintf(
           cur, "INSERT INTO %s %s VALUES ((SELECT max(id) + 1 FROM %s), ",
           pqQuantizationTable, schema_fine_quantization, pqQuantizationTable);

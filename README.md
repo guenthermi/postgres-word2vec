@@ -145,7 +145,7 @@ An Evaluation of the kNN-Join performance you can see here. The baseline in the 
 
  ![kNN Join Evaluation](evaluation/time_precision_eval_gn.png)
 
- **Parameters:**
+ **Parameters:**  
  Query Vector Size: 5,000  
  Target Vector Size: 100,000  
  K: 5  
