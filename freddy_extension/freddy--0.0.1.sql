@@ -130,9 +130,10 @@ init_done int;
 number_tables int;
 BEGIN
 EXECUTE 'SELECT count(proname) FROM pg_proc WHERE proname=''get_vecs_name''' INTO init_done;
-EXECUTE 'SELECT count(*) FROM information_schema.tables WHERE table_schema=''public'' AND table_type=''BASE TABLE'' AND table_name in (''google_vecs'', ''google_vecs_norm'', ''pq_quantization'', ''pq_codebook'', ''fine_quantization'', ''coarse_quantization'', ''residual_codebook'', ''ivpq_quantization'', ''ivpq_codebook'')' INTO number_tables;
+EXECUTE 'SELECT count(*) FROM information_schema.tables WHERE table_schema=''public'' AND table_type=''BASE TABLE'' AND table_name in (''google_vecs'', ''google_vecs_norm'', ''pq_quantization'', ''pq_codebook'', ''fine_quantization'', ''coarse_quantization'', ''residual_codebook'', ''fine_quantization_ivpq'', ''codebook_ivpq'', ''coarse_quantization_ivpq'')' INTO number_tables;
+RAISE NOTICE 'i want to print % and %', init_done,number_tables;
 IF init_done = 0 AND number_tables = 10 THEN
-  EXECUTE 'SELECT init(''google_vecs'', ''google_vecs_norm'', ''pq_quantization'', ''pq_codebook'', ''fine_quantization'', ''coarse_quantization'', ''residual_codebook'', ''ivpq_quantization'', ''ivpq_codebook'', ''coarse_quantization_ivpq'')';
+  EXECUTE 'SELECT init(''google_vecs'', ''google_vecs_norm'', ''pq_quantization'', ''pq_codebook'', ''fine_quantization'', ''coarse_quantization'', ''residual_codebook'', ''fine_quantization_ivpq'', ''codebook_ivpq'', ''coarse_quantization_ivpq'')';
 END IF;
 END$$;
 

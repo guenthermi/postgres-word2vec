@@ -1,0 +1,21 @@
+{
+  "m": 30,
+  "k": 32,
+  "k_coarse": 32,
+  "train_size_coarse": 100000,
+  "train_size_fine": 100000,
+  "coarse_table_name": "coarse_quantization_ivpq",
+  "fine_table_name": "fine_quantization_ivpq",
+  "cb_table_name": "codebook_ivpq",
+  "fine_word_index_name": "fine_quantization_ivpq_word_idx",
+  "fine_coarse_index_name": "fine_quantization_ivpq_coarse_idx",
+  "vec_file_path": "../vectors/google_vecs.txt",
+  "add_to_database": true,
+  "export_filename": "",
+  "pipeline": false,
+  "export_pipeline_data": "",
+  "coarse_quantizer_file": "",
+  "codebook_file": "",
+  "statistic_table": "google_vecs_norm",
+  "statistic_column": "word"
+}
