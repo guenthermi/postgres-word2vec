@@ -44,12 +44,12 @@ ORDER BY m.title ASC, t.squaredistance DESC;
 ### K Nearest Neighbour Queries with Specific Output Set
 
 ```
-top_k_in_pq(varchar, int, varchar[]);
+knn_in_pq(varchar, int, varchar[]);
 ```
 **Example**
 ```
 SELECT * FROM
-top_k_in_pq('Godfather', 5, ARRAY(SELECT title FROM movies));
+knn_in_pq('Godfather', 5, ARRAY(SELECT title FROM movies));
 ```
 
 ### K Nearest Neighbour Join Queries
@@ -188,6 +188,13 @@ For the kNN-Join operation, an index structure can be created with "ivpq.py":
 python3 ivpq.py config/ivpq_config.json
 ```
 
+After all index tables are created, you might execute `CREATE EXTENSION freddy;` a second time. To provide the table names of the index structures for the extension, you can use the `init` function in the PSQL console (If you used the default names this might not be necessary) Replace the default names with the names defined in the JSON configuration files:
+
+```
+SELECT init('google_vecs', 'google_vecs_norm', 'pq_quantization', 'pq_codebook', 'fine_quantization', 'coarse_quantization', 'residual_codebook', 'fine_quantization_ivpq', 'codebook_ivpq', 'coarse_quantization_ivpq')
+```
+
+
 **Statistics:**
 In addition to the index structures, the kNN-Join operation uses statistics about the distribution of the index vectors over index partitions.
 This statistical information is essential for the search operation.
@@ -200,11 +207,6 @@ In addition to that, one can create statistics for other text columns in the dat
 The statistic table used by the operation can be select by the `set_statistics_table` function:
 ```
 SELECT set_statistics_table('stat_google_vecs_norm_word')
-```
-After all index tables are created, you might execute `CREATE EXTENSION freddy;` a second time. To provide the table names of the index structures for the extension, you can use the `init` function in the PSQL console (If you used the default names this might not be necessary) Replace the default names with the names defined in the JSON configuration files:
-
-```
-SELECT init('google_vecs', 'google_vecs_norm', 'pq_quantization', 'pq_codebook', 'fine_quantization', 'coarse_quantization', 'residual_codebook', 'fine_quantization_ivpq', 'codebook_ivpq', 'coarse_quantization_ivpq')
 ```
 
 ## References
