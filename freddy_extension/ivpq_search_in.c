@@ -18,7 +18,7 @@
 
 // clang-format on
 
-inline void initTargetLists(TargetListElem **result, int queryIndicesSize,
+static inline void initTargetLists(TargetListElem **result, int queryIndicesSize,
                             const int target_lists_size, const int method) {
   TargetListElem *targetLists =
       palloc(queryIndicesSize * sizeof(struct TargetListElem));
@@ -37,13 +37,13 @@ inline void initTargetLists(TargetListElem **result, int queryIndicesSize,
   *result = targetLists;
 }
 
-inline void reorderTopKPV(TopKPV tk, int k, int *fillLevel, float *maxDist) {
+static inline void reorderTopKPV(TopKPV tk, int k, int *fillLevel, float *maxDist) {
   qsort(tk, *fillLevel, sizeof(TopKPVEntry), cmpTopKPVEntry);
   *fillLevel = k;
   *maxDist = tk[k - 1].distance;
 }
 
-inline void updateTopKPVFast(TopKPV tk, const int batchSize, int k,
+static inline void updateTopKPVFast(TopKPV tk, const int batchSize, int k,
                              int *fillLevel, float *maxDist, int dim, int id,
                              float distance, float4 *vector) {
   tk[*fillLevel].id = id;
@@ -687,13 +687,11 @@ Datum ivpq_search_in(PG_FUNCTION_ARGS) {
     usrfctx = (UsrFctxBatch *)palloc(sizeof(UsrFctxBatch));
     fillUsrFctxBatch(usrfctx, queryIds, queryVectorsSize, topKs, k);
     funcctx->user_fctx = (void *)usrfctx;
-    outtertupdesc = CreateTemplateTupleDesc(3, false);
+    outtertupdesc = CreateTemplateTupleDesc(3);
 
     TupleDescInitEntry(outtertupdesc, 1, "QueryId", INT4OID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 2, "TargetId", INT4OID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 3, "Distance", FLOAT4OID, -1, 0);
-    slot = TupleDescGetSlot(outtertupdesc);
-    funcctx->slot = slot;
     attinmeta = TupleDescGetAttInMetadata(outtertupdesc);
     funcctx->attinmeta = attinmeta;
     end = clock();

@@ -386,6 +386,10 @@ CREATE OR REPLACE FUNCTION vec_to_bytea(anyarray) RETURNS bytea
 AS '$libdir/freddy', 'vec_to_bytea'
 LANGUAGE C IMMUTABLE STRICT;
 
+CREATE OR REPLACE FUNCTION add_online_retrofitting_statistics(varchar(100)) RETURNS integer
+AS '$libdir/freddy', 'add_online_retrofitting_statistics'
+LANGUAGE C IMMUTABLE STRICT;
+
 CREATE OR REPLACE FUNCTION k_nearest_neighbour(input_vector bytea, k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;

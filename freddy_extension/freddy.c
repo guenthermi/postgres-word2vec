@@ -10,8 +10,12 @@
 #include "stdio.h"
 #include "stdlib.h"
 #include "time.h"
+#include "utils/lsyscache.h"        // TODO: remove? war vorher nicht noetig....warum jetzt????
 
 #include "hashmap.h"
+
+//#define JSMN_HEADER
+#include "jsmn.h"
 
 #include "catalog/pg_type.h"
 
@@ -22,12 +26,16 @@
 
 // clang-format on
 
+/* convert C string to text pointer */
+#define GET_TEXT(cstrp) DatumGetTextP(DirectFunctionCall1(textin, CStringGetDatum(cstrp)))
+/* convert text pointer to C string */
+#define GET_STR(textp) DatumGetCString(DirectFunctionCall1(textout, PointerGetDatum(textp)))
+
 PG_FUNCTION_INFO_V1(pq_search);
 
 Datum pq_search(PG_FUNCTION_ARGS) {
   FuncCallContext* funcctx;
   TupleDesc outtertupdesc;
-  TupleTableSlot* slot;
   AttInMetadata* attinmeta;
   UsrFctx* usrfctx;
 
@@ -139,11 +147,9 @@ Datum pq_search(PG_FUNCTION_ARGS) {
     usrfctx = (UsrFctx*)palloc(sizeof(UsrFctx));
     fillUsrFctx(usrfctx, topK, k);
     funcctx->user_fctx = (void*)usrfctx;
-    outtertupdesc = CreateTemplateTupleDesc(2, false);
+    outtertupdesc = CreateTemplateTupleDesc(2);
     TupleDescInitEntry(outtertupdesc, 1, "Id", INT4OID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 2, "Distance", FLOAT4OID, -1, 0);
-    slot = TupleDescGetSlot(outtertupdesc);
-    funcctx->slot = slot;
     attinmeta = TupleDescGetAttInMetadata(outtertupdesc);
     funcctx->attinmeta = attinmeta;
 
@@ -176,7 +182,6 @@ PG_FUNCTION_INFO_V1(ivfadc_search);
 Datum ivfadc_search(PG_FUNCTION_ARGS) {
   FuncCallContext* funcctx;
   TupleDesc outtertupdesc;
-  TupleTableSlot* slot;
   AttInMetadata* attinmeta;
   UsrFctx* usrfctx;
 
@@ -383,11 +388,9 @@ Datum ivfadc_search(PG_FUNCTION_ARGS) {
     usrfctx = (UsrFctx*)palloc(sizeof(UsrFctx));
     fillUsrFctx(usrfctx, topK, k);
     funcctx->user_fctx = (void*)usrfctx;
-    outtertupdesc = CreateTemplateTupleDesc(2, false);
+    outtertupdesc = CreateTemplateTupleDesc(2);
     TupleDescInitEntry(outtertupdesc, 1, "Id", INT4OID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 2, "Distance", FLOAT4OID, -1, 0);
-    slot = TupleDescGetSlot(outtertupdesc);
-    funcctx->slot = slot;
     attinmeta = TupleDescGetAttInMetadata(outtertupdesc);
     funcctx->attinmeta = attinmeta;
 
@@ -422,7 +425,6 @@ Datum pq_search_in_batch(PG_FUNCTION_ARGS) {
 
   FuncCallContext* funcctx;
   TupleDesc outtertupdesc;
-  TupleTableSlot* slot;
   AttInMetadata* attinmeta;
   UsrFctxBatch* usrfctx;
 
@@ -646,13 +648,11 @@ Datum pq_search_in_batch(PG_FUNCTION_ARGS) {
     usrfctx = (UsrFctxBatch*)palloc(sizeof(UsrFctxBatch));
     fillUsrFctxBatch(usrfctx, queryIds, queryVectorsSize, topKs, k);
     funcctx->user_fctx = (void*)usrfctx;
-    outtertupdesc = CreateTemplateTupleDesc(3, false);
+    outtertupdesc = CreateTemplateTupleDesc(3);
 
     TupleDescInitEntry(outtertupdesc, 1, "QueryId", INT4OID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 2, "TargetId", INT4OID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 3, "Distance", FLOAT4OID, -1, 0);
-    slot = TupleDescGetSlot(outtertupdesc);
-    funcctx->slot = slot;
     attinmeta = TupleDescGetAttInMetadata(outtertupdesc);
     funcctx->attinmeta = attinmeta;
     end = clock();
@@ -687,7 +687,6 @@ PG_FUNCTION_INFO_V1(ivfadc_batch_search);
 Datum ivfadc_batch_search(PG_FUNCTION_ARGS) {
   FuncCallContext* funcctx;
   TupleDesc outtertupdesc;
-  TupleTableSlot* slot;
   AttInMetadata* attinmeta;
   UsrFctxBatch* usrfctx;
 
@@ -994,13 +993,11 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS) {
     usrfctx = (UsrFctxBatch*)palloc(sizeof(UsrFctxBatch));
     fillUsrFctxBatch(usrfctx, idArray, queryVectorsSize, topKs, k);
     funcctx->user_fctx = (void*)usrfctx;
-    outtertupdesc = CreateTemplateTupleDesc(3, false);
+    outtertupdesc = CreateTemplateTupleDesc(3);
 
     TupleDescInitEntry(outtertupdesc, 1, "QueryId", INT4OID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 2, "Id", INT4OID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 3, "Distance", FLOAT4OID, -1, 0);
-    slot = TupleDescGetSlot(outtertupdesc);
-    funcctx->slot = slot;
     attinmeta = TupleDescGetAttInMetadata(outtertupdesc);
     funcctx->attinmeta = attinmeta;
 
@@ -1039,7 +1036,6 @@ PG_FUNCTION_INFO_V1(pq_search_in);
 Datum pq_search_in(PG_FUNCTION_ARGS) {
   FuncCallContext* funcctx;
   TupleDesc outtertupdesc;
-  TupleTableSlot* slot;
   AttInMetadata* attinmeta;
   UsrFctx* usrfctx;
 
@@ -1158,11 +1154,9 @@ Datum pq_search_in(PG_FUNCTION_ARGS) {
       usrfctx = (UsrFctx*)palloc(sizeof(UsrFctx));
       fillUsrFctx(usrfctx, topK, k);
       funcctx->user_fctx = (void*)usrfctx;
-      outtertupdesc = CreateTemplateTupleDesc(2, false);
+      outtertupdesc = CreateTemplateTupleDesc(2);
       TupleDescInitEntry(outtertupdesc, 1, "Id", INT4OID, -1, 0);
       TupleDescInitEntry(outtertupdesc, 2, "Distance", FLOAT4OID, -1, 0);
-      slot = TupleDescGetSlot(outtertupdesc);
-      funcctx->slot = slot;
       attinmeta = TupleDescGetAttInMetadata(outtertupdesc);
       funcctx->attinmeta = attinmeta;
 
@@ -1196,7 +1190,6 @@ Datum cluster_pq(PG_FUNCTION_ARGS) {
 
   FuncCallContext* funcctx;
   TupleDesc outtertupdesc;
-  TupleTableSlot* slot;
   AttInMetadata* attinmeta;
   UsrFctxCluster* usrfctx;
   int vectorSize = 300;  // TODO change this
@@ -1410,11 +1403,9 @@ Datum cluster_pq(PG_FUNCTION_ARGS) {
     usrfctx->values[0] = (char*)palloc((18 * vectorSize + 4) * sizeof(char));
     usrfctx->values[1] = (char*)palloc((inputIdsSize * 8) * sizeof(char));
     funcctx->user_fctx = (void*)usrfctx;
-    outtertupdesc = CreateTemplateTupleDesc(2, false);
+    outtertupdesc = CreateTemplateTupleDesc(2);
     TupleDescInitEntry(outtertupdesc, 1, "Vector", FLOAT4ARRAYOID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 2, "Ids", INT4ARRAYOID, -1, 0);
-    slot = TupleDescGetSlot(outtertupdesc);
-    funcctx->slot = slot;
     attinmeta = TupleDescGetAttInMetadata(outtertupdesc);
     funcctx->attinmeta = attinmeta;
     MemoryContextSwitchTo(oldcontext);
@@ -1462,7 +1453,6 @@ PG_FUNCTION_INFO_V1(grouping_pq);
 Datum grouping_pq(PG_FUNCTION_ARGS) {
   FuncCallContext* funcctx;
   TupleDesc outtertupdesc;
-  TupleTableSlot* slot;
   AttInMetadata* attinmeta;
   UsrFctxGrouping* usrfctx;
   int vectorSize = 300;
@@ -1656,11 +1646,9 @@ Datum grouping_pq(PG_FUNCTION_ARGS) {
     usrfctx->values[0] = (char*)palloc((18) * sizeof(char));
     usrfctx->values[1] = (char*)palloc((18 * vectorSize + 4) * sizeof(char));
     funcctx->user_fctx = (void*)usrfctx;
-    outtertupdesc = CreateTemplateTupleDesc(2, false);
+    outtertupdesc = CreateTemplateTupleDesc(2);
     TupleDescInitEntry(outtertupdesc, 1, "Ids", INT4OID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 2, "GroupIds", INT4OID, -1, 0);
-    slot = TupleDescGetSlot(outtertupdesc);
-    funcctx->slot = slot;
     attinmeta = TupleDescGetAttInMetadata(outtertupdesc);
     funcctx->attinmeta = attinmeta;
 
@@ -2110,4 +2098,74 @@ Datum vec_to_bytea(PG_FUNCTION_ARGS) {
   }
 
   PG_RETURN_BYTEA_P(out);
+}
+
+
+PG_FUNCTION_INFO_V1(add_online_retrofitting_statistics);
+
+Datum add_online_retrofitting_statistics(PG_FUNCTION_ARGS) {
+    int r;
+
+    int columnDataSize;
+    ColumnData* columnData;
+    int relationDataSize;
+    RelationData* relationData;
+    int relNumDataSize;
+    RelNumData* relNumData;
+
+    FILE* fp;
+    long fsize;
+    char *JSON_STRING;
+
+    const char* path = GET_STR(PG_GETARG_DATUM(0));
+
+    fp = fopen(path, "r");
+    if (fp == NULL) {
+        PG_RETURN_INT32(1);
+    }
+    fseek(fp, 0, SEEK_END);
+    fsize = ftell(fp);
+    rewind(fp);
+
+    JSON_STRING = palloc(fsize + 1);
+    fread(JSON_STRING, 1, fsize, fp);
+    fclose(fp);
+    JSON_STRING[fsize] = 0;
+
+    jsmn_parser p;
+    jsmntok_t t[200000];                        // TODO: find good value
+    jsmn_init(&p);
+    r = jsmn_parse(&p, JSON_STRING, strlen(JSON_STRING), t, 200000);
+
+    if (r < 0) {
+        PG_RETURN_INT32(2);
+        return 0;
+    }
+
+    if (r < 1 || t[0].type != JSMN_OBJECT) {
+        PG_RETURN_INT32(3);
+        return 0;
+    }
+
+    for (int i = 1; i < r; i++) {
+        if (jsoneq(JSON_STRING, &t[i], "columns") == 0) {
+            columnData = getColumnData(JSON_STRING, t, i + 1, &columnDataSize);
+            continue;
+        }
+        if (jsoneq(JSON_STRING, &t[i], "relations") == 0) {
+            relationData = getRelationData(JSON_STRING, t, i + 1, &relationDataSize);
+            continue;
+        }
+        if (jsoneq(JSON_STRING, &t[i], "rel_nums") == 0) {
+            relNumData = getRelNumData(JSON_STRING, t, i + 1, &relNumDataSize);
+            continue;
+        }
+    }
+
+    clearStats();
+    updateColumnStatistics(columnData, columnDataSize);
+    updateRelationStatistics(relationData, relationDataSize);
+    updateRelNumDataStatistics(relNumData, relNumDataSize);
+
+    PG_RETURN_INT32(0);
 }

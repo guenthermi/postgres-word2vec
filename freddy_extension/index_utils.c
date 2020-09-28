@@ -9,10 +9,15 @@
 #include "fmgr.h"
 #include "funcapi.h"
 #include "stdlib.h"
+#include "string.h"
 #include "time.h"
 #include "executor/spi.h"
 #include "utils/builtins.h"
 #include "utils/array.h"
+#include "utils/lsyscache.h"        // TODO: remove? war vorher nicht noetig....warum jetzt????
+
+#define JSMN_HEADER
+#include "jsmn.h"
 
 // clang-format on
 
@@ -1121,4 +1126,329 @@ void convert_int16_bytea(int16* input, bytea** output, int size) {
   *output = (text*)palloc(size * sizeof(int16) + VARHDRSZ);
   SET_VARSIZE(*output, VARHDRSZ + size * sizeof(int16));
   memcpy(VARDATA(*output), input, size * sizeof(int16));
+}
+
+int jsoneq(const char *json, jsmntok_t *tok, const char *s) {
+    if (tok->type == JSMN_STRING && (int)strlen(s) == tok->end - tok->start &&
+        strncmp(json + tok->start, s, tok->end - tok->start) == 0) {
+        return 0;
+    }
+    return -1;
+}
+
+char* sprintf_json(const char* json, jsmntok_t* t) {
+    char* s = palloc(t->end - t->start + 1);
+    sprintf(s, "%.*s", t->end - t->start, json + t->start);
+    s[t->end - t->start] = '\0';
+    return s;
+}
+
+ColumnData* getColumnData(const char* json, jsmntok_t* t, int k, int* columnDataSize) {
+    static ColumnData ret[10];
+    int index;
+
+    if (t[k].type != JSMN_OBJECT) {
+        return ret;
+    }
+
+    *columnDataSize = t[k].size;
+
+    for (int i = 0; i < t[k].size; i++) {
+        index = k + i * 6 + 1;
+
+        if (t[index].type == JSMN_STRING) {
+            ret[i].name = sprintf_json(json, &t[index]);
+        }
+        if (t[index + 1].type == JSMN_OBJECT) {
+            if (jsoneq(json, &t[index + 2], "mean") == 0) {
+                ret[i].mean = sprintf_json(json, &t[index + 3]);
+            }
+            if (jsoneq(json, &t[index + 4], "size") == 0) {
+                ret[i].size = sprintf_json(json, &t[index + 5]);                    // TODO:  should be number
+            }
+        }
+    }
+    return ret;
+}
+
+CardinalityData* getCardinalities(const char* json, jsmntok_t* t, int k, int size, int* count) {
+    CardinalityData* ret = palloc(sizeof(CardinalityData) * size);
+    int index;
+
+    if (t[k].type != JSMN_OBJECT) {
+        return ret;
+    }
+
+    *count = t[k].size * 2;
+
+    for (int i = 0; i < t[k].size; i++) {
+        index = k + i * 2 + 1;
+        if (t[index].type == JSMN_STRING) {
+            (ret + i)->value = sprintf_json(json, &t[index]);
+        }
+        if (t[index + 1].type == JSMN_PRIMITIVE) {
+            (ret + i)->cardinality = sprintf_json(json, &t[index + 1]);
+        }
+    }
+    return ret;
+}
+
+RelationColumnData* getRelationColumnData(const char* json, jsmntok_t* t, int k, int* count) {
+    int cardinalities = 0;
+    RelationColumnData* ret = palloc(sizeof(RelationColumnData));
+
+    if (t[k].type != JSMN_OBJECT) {
+        return ret;
+    }
+    if (jsoneq(json, &t[k + 1], "name") == 0) {
+        ret->name = sprintf_json(json, &t[k + 2]);
+    }
+    if (jsoneq(json, &t[k + 3], "centroid") == 0) {
+        ret->centroid = sprintf_json(json, &t[k + 4]);
+    }
+    if (jsoneq(json, &t[k + 5], "size") == 0) {
+        ret->size = sprintf_json(json, &t[k + 6]);
+    }
+    if (jsoneq(json, &t[k + 7], "cardinalities") == 0) {
+        ret->cardinalities = getCardinalities(json, t, k + 8, strtol(ret->size, NULL, 10), &cardinalities);
+    }
+
+    *count = 8 + cardinalities;
+    return ret;
+}
+
+RelationData* getRelationData(const char* json, jsmntok_t* t, int k, int* relationDataSize) {
+    static RelationData ret[10];                    // TODO: size??
+    int index = k;
+    int countCol1 = 0;
+    int countCol2 = 0;
+
+    if (t[k].type != JSMN_OBJECT) {
+        return ret;
+    }
+
+    *relationDataSize = t[k].size;
+
+    for (int i = 0; i < t[k].size; i++) {
+        index++;
+        if (t[index].type == JSMN_STRING) {
+            ret[i].relation_name = sprintf_json(json, &t[index]);
+        }
+        if (t[index + 1].type == JSMN_OBJECT) {
+            if (jsoneq(json, &t[index + 2], "name") == 0) {
+                ret[i].name = sprintf_json(json, &t[index + 3]);
+            }
+            if (jsoneq(json, &t[index + 4], "col1") == 0) {
+                ret[i].col1 = getRelationColumnData(json, t, index + 5, &countCol1);
+            }
+            if (jsoneq(json, &t[index + countCol1 + 6], "col2") == 0) {
+                ret[i].col2 = getRelationColumnData(json, t, index + countCol1 + 7, &countCol2);
+            }
+            if (jsoneq(json, &t[index + countCol1 + countCol2 + 8], "max_r") == 0) {
+                ret[i].max_r = sprintf_json(json, &t[index + countCol1 + countCol2 + 9]);
+            }
+            if (jsoneq(json, &t[index + countCol1 + countCol2 + 10], "max_c") == 0) {
+                ret[i].max_c = sprintf_json(json, &t[index + countCol1 + countCol2 + 11]);
+            }
+        }
+        index += countCol1 + countCol2 + 11;
+    }
+    return ret;
+}
+
+RelNumData* getRelNumData(const char* json, jsmntok_t* t, int k, int* relNumDataSize) {
+    static RelNumData ret[50000];
+    int index;
+
+    if (t[k].type != JSMN_OBJECT) {
+        return ret;
+    }
+
+    *relNumDataSize = t[k].size;
+
+    for (int i = 0; i < t[k].size; i++) {
+        index = k + i * 2 + 1;
+
+        if (t[index].type == JSMN_STRING) {
+            ret[i].rel = sprintf_json(json, &t[index]);
+        }
+        if (t[index + 1].type == JSMN_PRIMITIVE) {
+            ret[i].value = sprintf_json(json, &t[index + 1]);               // TODO:  should be number
+        }
+    }
+    return ret;
+}
+
+char* escape(char* str) {
+    int len = strlen(str);
+
+    for (int i = 0; i < len; i++) {
+        if (str[i] == '\'') {
+            char* substr1 = palloc0(len + 1);
+            memcpy(substr1, str, i);
+            substr1[i + 1] = '\0';
+
+            char* substr2 = palloc0(len - i);
+            memcpy(substr2, &str[i + 1], len - i - 1);
+            substr2[len - i - 1] = '\0';
+
+            strcat(substr1, "''");
+            strcat(substr1, escape(substr2));
+            str = substr1;
+            break;
+        }
+    }
+    return str;
+}
+
+void clearStats() {
+    char* command = palloc(100);
+    char* ret;
+    char tables[5][20] = {"cardinality_stats", "column_stats", "rel_num_stats", "relation_stats", "rel_col_stats"};
+
+    for (int i = 0; i < 5; i++) {
+        sprintf(command, "DELETE FROM %s", tables + i);
+
+        SPI_connect();
+        ret = SPI_exec(command, 0);
+        if (ret > 0) {
+            SPI_finish();
+        }
+    }
+    pfree(command);
+}
+
+void updateColumnStatistics(ColumnData* columnData, int columnCount) {
+    // NOTE: needed to set max_stack_depth to 4 MB for it to work, maybe optimize...                                    // TODO: maybe back to 2MB??
+    char* command;
+    char* cur;
+    int ret;
+
+    for (int i = 0; i < columnCount; i++) {
+        command = palloc(100
+                + strlen((columnData + i)->name)
+                + strlen((columnData + i)->mean)
+                + 10);
+        cur = command;
+
+        cur += sprintf(
+                cur, "INSERT INTO column_stats (name, mean, size) VALUES ('%s', '%s', %s) "
+                     "ON CONFLICT (name) DO UPDATE SET (mean, size) = (EXCLUDED.mean, EXCLUDED.size)",
+                (columnData + i)->name, (columnData + i)->mean, (columnData + i)->size);
+        SPI_connect();
+        ret = SPI_exec(command, 0);
+        if (ret > 0) {
+            SPI_finish();
+        }
+        pfree(command);
+    }
+}
+
+void updateCardinalityStatistics(struct CardinalityData* cardinalityData, int count, char* relColId) {
+    char* command;
+    char* cur;
+    int ret;
+
+    for (int i = 0; i < count; i++) {
+        command = palloc(100
+                         + strlen((cardinalityData + i)->value)
+                         + 10);
+        cur = command;
+        cur += sprintf(
+                cur, "INSERT INTO cardinality_stats (value, cardinality, col_id) VALUES ('%s', %s, %s) ",
+                escape((cardinalityData + i)->value), (cardinalityData + i)->cardinality, relColId);
+        SPI_connect();
+        ret = SPI_exec(command, 0);
+        if (ret > 0) {
+            SPI_finish();
+        }
+        pfree(command);
+    }
+}
+
+char* updateRelColStatistics(struct RelationColumnData* relationColumnData) {
+    char* command;
+    char* cur;
+    char* id = NULL;
+    ResultInfo rInfo;
+
+    command = palloc(100
+                     + strlen(relationColumnData->name)
+                     + strlen(relationColumnData->centroid)
+                     + 10);
+    cur = command;
+    cur += sprintf(
+            cur, "INSERT INTO rel_col_stats (name, centroid, size) VALUES ('%s', '%s', %s) "
+                 "RETURNING id",
+            escape(relationColumnData->name), escape(relationColumnData->centroid), relationColumnData->size);
+
+    SPI_connect();
+    rInfo.ret = SPI_exec(command, 0);
+    rInfo.proc = SPI_processed;
+    if (rInfo.ret > 0 && SPI_tuptable != NULL) {
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        SPITupleTable* tuptable = SPI_tuptable;
+        for (int i = 0; i < rInfo.proc; i++) {
+            HeapTuple tuple = tuptable->vals[i];
+            id = SPI_getvalue(tuple, tupdesc, 1);
+        }
+        SPI_finish();
+    }
+    if (id) {
+        updateCardinalityStatistics(relationColumnData->cardinalities, strtol(relationColumnData->size, NULL, 10), id);
+    }
+    pfree(command);
+    return id;
+}
+
+void updateRelationStatistics(struct RelationData* relationData, int count) {
+    char* col1;
+    char* col2;
+    char* command;
+    char* cur;
+    int ret;
+
+    for (int i = 0; i < count; i++) {
+        col1 = updateRelColStatistics((relationData + i)->col1);
+        col2 = updateRelColStatistics((relationData + i)->col2);
+
+        command = palloc(300
+                         + strlen((relationData + i)->relation_name)
+                         + strlen((relationData + i)->name)
+                         + 20);
+        cur = command;
+        cur += sprintf(
+                cur, "INSERT INTO relation_stats (relation_name, name, col1, col2, max_r, max_c) VALUES ('%s', '%s', %s, %s, %s, %s) "
+                     "ON CONFLICT (relation_name) DO UPDATE SET (name, col1, col2, max_r, max_c) = (EXCLUDED.name, EXCLUDED.col1, EXCLUDED.col2, EXCLUDED.max_r, EXCLUDED.max_c)",
+                escape((relationData + i)->relation_name), escape((relationData + i)->name), col1, col2, (relationData + i)->max_r, (relationData + i)->max_c);
+        SPI_connect();
+        ret = SPI_exec(command, 0);
+        if (ret > 0) {
+            SPI_finish();
+        }
+        pfree(command);
+    }
+}
+
+void updateRelNumDataStatistics(RelNumData* relNumData, int relCount) {
+    char* command;
+    char* cur;
+    int ret;
+
+    for (int i = 0; i < relCount; i++) {
+        command = palloc(100
+                + strlen((relNumData + i)->rel)
+                + 10);
+        cur = command;
+        cur += sprintf(
+                cur, "INSERT INTO rel_num_stats (rel, value) VALUES ('%s', %s) "
+                     "ON CONFLICT (rel) DO UPDATE SET value = EXCLUDED.value",
+                escape((relNumData + i)->rel), (relNumData + i)->value);
+        SPI_connect();
+        ret = SPI_exec(command, 0);
+        if (ret > 0) {
+            SPI_finish();
+        }
+        pfree(command);
+    }
 }

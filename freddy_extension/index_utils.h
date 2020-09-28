@@ -6,6 +6,9 @@
 #include "postgres.h"
 #include "utils/array.h"
 
+#define JSMN_HEADER
+#include "jsmn.h"
+
 // clang-format on
 
 typedef struct ResultInfo {
@@ -113,6 +116,38 @@ typedef struct CodebookCompound {
   int codeSize;
   int positions;
 } CodebookCompound;
+
+typedef struct ColumnData {
+    char* name;
+    char* mean;
+    char* size;
+} ColumnData;
+
+typedef struct CardinalityData {
+    char* value;
+    char* cardinality;
+} CardinalityData;
+
+typedef struct RelationColumnData {
+    char* name;
+    char* centroid;
+    char* size;
+    CardinalityData* cardinalities;
+} RelationColumnData;
+
+typedef struct RelationData {
+    char* relation_name;
+    char* name;
+    RelationColumnData* col1;
+    RelationColumnData* col2;
+    char* max_r;
+    char* max_c;
+} RelationData;
+
+typedef struct RelNumData {
+    char* rel;
+    char* value;
+} RelNumData;
 
 void updateTopK(TopK tk, float distance, int id, int k, int maxDist);
 
@@ -228,7 +263,35 @@ void convert_int16_bytea(int16* input, bytea** output, int size);
 
 void convert_float4_bytea(float4* input, bytea** output, int size);
 
-inline float computePQDistanceInt16(float* preDists, int16* codes,
+int jsoneq(const char *json, jsmntok_t *tok, const char *s);
+
+char* sprintf_json(const char* json, jsmntok_t* t);
+
+char* escape(char* str);
+
+ColumnData* getColumnData(const char* json, jsmntok_t* t, int k, int* columnDataSize);
+
+CardinalityData* getCardinalities(const char* json, jsmntok_t* t, int k, int size, int* count);
+
+RelationColumnData* getRelationColumnData(const char* json, jsmntok_t* t, int k, int* relationDataSize);
+
+RelationData* getRelationData(const char* json, jsmntok_t* t, int k, int* relationDataSize);
+
+RelNumData* getRelNumData(const char* json, jsmntok_t* t, int k, int* relNumDataSize);
+
+void clearStats(void);
+
+void updateColumnStatistics(ColumnData* columnData, int columnCount);
+
+void updateCardinalityStatistics(struct CardinalityData* cardinalityData, int count, char* relColId);
+
+char* updateRelColStatistics(struct RelationColumnData* relationColumnData);
+
+void updateRelationStatistics(struct RelationData* relationData, int count);
+
+void updateRelNumDataStatistics(RelNumData* relNumData, int relCount);
+
+static inline float computePQDistanceInt16(float* preDists, int16* codes,
                                     int cbPositions, int cbCodes) {
   float distance = 0;
   for (int l = 0; l < cbPositions; l++) {
@@ -237,7 +300,7 @@ inline float computePQDistanceInt16(float* preDists, int16* codes,
   return distance;
 }
 
-inline void addToTargetList(TargetListElem* targetLists, int queryVectorsIndex,
+static inline void addToTargetList(TargetListElem* targetLists, int queryVectorsIndex,
                             const int target_lists_size, const int method,
                             int16* codes, float4* vector, int wordId) {
   TargetListElem* currentTargetList = targetLists[queryVectorsIndex].last;
