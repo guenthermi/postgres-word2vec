@@ -2105,6 +2105,8 @@ PG_FUNCTION_INFO_V1(add_online_retrofitting_statistics);
 
 Datum add_online_retrofitting_statistics(PG_FUNCTION_ARGS) {
     int r;
+    char* JSON_STRING;
+    jsmntok_t* t;
 
     int columnDataSize;
     ColumnData* columnData;
@@ -2113,41 +2115,20 @@ Datum add_online_retrofitting_statistics(PG_FUNCTION_ARGS) {
     int relNumDataSize;
     RelNumData* relNumData;
 
-    FILE* fp;
-    long fsize;
-    char *JSON_STRING;
-
     const char* path = GET_STR(PG_GETARG_DATUM(0));
 
-    fp = fopen(path, "r");
-    if (fp == NULL) {
-        PG_RETURN_INT32(1);
-    }
-    fseek(fp, 0, SEEK_END);
-    fsize = ftell(fp);
-    rewind(fp);
-
-    JSON_STRING = palloc(fsize + 1);
-    fread(JSON_STRING, 1, fsize, fp);
-    fclose(fp);
-    JSON_STRING[fsize] = 0;
-
-    jsmn_parser p;
-    jsmntok_t t[200000];                        // TODO: find good value
-    jsmn_init(&p);
-    r = jsmn_parse(&p, JSON_STRING, strlen(JSON_STRING), t, 200000);
+    t = readJsonFile(path, &JSON_STRING, &r);
 
     if (r < 0) {
         PG_RETURN_INT32(2);
         return 0;
     }
-
     if (r < 1 || t[0].type != JSMN_OBJECT) {
         PG_RETURN_INT32(3);
         return 0;
     }
 
-    for (int i = 1; i < r; i++) {
+    for (int i = 1; i < r; i++) {                                       // TODO: currently there are more loop runs then necessary (some tokens can be skipped)
         if (jsoneq(JSON_STRING, &t[i], "columns") == 0) {
             columnData = getColumnData(JSON_STRING, t, i + 1, &columnDataSize);
             continue;
@@ -2166,6 +2147,38 @@ Datum add_online_retrofitting_statistics(PG_FUNCTION_ARGS) {
     updateColumnStatistics(columnData, columnDataSize);
     updateRelationStatistics(relationData, relationDataSize);
     updateRelNumDataStatistics(relNumData, relNumDataSize);
+
+    PG_RETURN_INT32(0);
+}
+
+PG_FUNCTION_INFO_V1(parseDeltaGroups);
+
+Datum parseDeltaGroups(PG_FUNCTION_ARGS) {
+    int r;
+    char* JSON_STRING;
+    jsmntok_t* t;
+
+    int endCat;
+    int deltaCatCount;
+    DeltaCat* deltaCat;
+    int deltaRelCount;
+    DeltaRel* deltaRel;
+
+    const char* path = GET_STR(PG_GETARG_DATUM(0));
+
+    t = readJsonFile(path, &JSON_STRING, &r);
+
+    if (r < 0) {
+        PG_RETURN_INT32(2);
+        return 0;
+    }
+    if (r < 1 || t[0].type != JSMN_OBJECT) {
+        PG_RETURN_INT32(3);
+        return 0;
+    }
+
+    deltaCat = getDeltaCats(JSON_STRING, t, r, &deltaCatCount, &endCat);
+    deltaRel = getDeltaRels(JSON_STRING, t, r, &deltaRelCount, endCat);
 
     PG_RETURN_INT32(0);
 }

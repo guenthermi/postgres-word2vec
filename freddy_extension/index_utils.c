@@ -1136,6 +1136,34 @@ int jsoneq(const char *json, jsmntok_t *tok, const char *s) {
     return -1;
 }
 
+jsmntok_t* readJsonFile(const char* path, char** json, int* r) {
+    FILE* fp;
+    long fsize;
+    jsmntok_t* t = NULL;
+
+    fp = fopen(path, "r");
+    if (fp == NULL) {
+        return t;
+    }
+    fseek(fp, 0, SEEK_END);
+    fsize = ftell(fp);
+    rewind(fp);
+
+    *json = palloc0(fsize + 1);
+    fread(*json, 1, fsize, fp);
+    fclose(fp);
+
+    jsmn_parser p;
+    jsmn_init(&p);
+
+    *r = jsmn_parse(&p, *json, strlen(*json), NULL, 0);
+    t = palloc(*r * sizeof(*t));
+
+    jsmn_init(&p);
+    *r = jsmn_parse(&p, *json, strlen(*json), t, *r);
+    return t;
+}
+
 char* sprintf_json(const char* json, jsmntok_t* t) {
     char* s = palloc(t->end - t->start + 1);
     sprintf(s, "%.*s", t->end - t->start, json + t->start);
@@ -1279,6 +1307,89 @@ RelNumData* getRelNumData(const char* json, jsmntok_t* t, int k, int* relNumData
     return ret;
 }
 
+DeltaElem* getDeltaElems(const char* json, jsmntok_t* t, int k, int* elemSize) {
+    DeltaElem* ret = palloc(t[k].size * sizeof(DeltaElem));                              // TODO: dynamic size
+    int index;
+
+    if (t[k].type != JSMN_OBJECT) {
+        return ret;
+    }
+
+    *elemSize = t[k].size * 2;
+
+    for (int i = 0; i < t[k].size; i++) {
+        index = k + i * 2 + 1;
+
+        if (t[index].type == JSMN_STRING) {
+            ret[i].name = sprintf_json(json, &t[index]);
+        }
+        if (t[index + 1].type == JSMN_STRING) {
+            ret[i].value = sprintf_json(json, &t[index + 1]);
+        }
+    }
+
+    return ret;
+}
+
+DeltaCat* getDeltaCats(const char* json, jsmntok_t* t, int maxTok, int* count, int* lastIndex) {
+    DeltaCat* ret = palloc(10 * sizeof(DeltaCat));                              // TODO: dynamic size
+    int index = 1;
+    int elemSize = 0;
+    int infElemSize = 0;
+    *count = 0;
+
+    for (int i = 0; index < maxTok; i++) {
+        if (t[index + 1].type == JSMN_OBJECT) {
+            if (jsoneq(json, &t[index + 2], "name") == 0) {
+                (ret + i)->name = sprintf_json(json, &t[index + 3]);
+            }
+            if (jsoneq(json, &t[index + 4], "type") == 0) {
+                (ret + i)->type = sprintf_json(json, &t[index + 5]);
+            }
+            if (jsoneq(json, &t[index + 6], "elements") == 0) {
+                (ret + i)->elements = getDeltaElems(json, t, index + 7, &elemSize);
+            }
+            if (jsoneq(json, &t[index + 8 + elemSize], "query") == 0) {
+                (ret + i)->query = sprintf_json(json, &t[index + 9 + elemSize]);
+            }
+            if (jsoneq(json, &t[index + 10 + elemSize], "inferred_elements") == 0) {
+                (ret + i)->inferredElements = getDeltaElems(json, t, index + 11 + elemSize, &infElemSize);
+            }
+            *count += 1;
+        }
+        if (t[index + 1].type == JSMN_ARRAY) break;
+        index += 12 + elemSize + infElemSize;
+    }
+    *lastIndex = index;
+    return ret;
+}
+
+DeltaRel* getDeltaRels(const char* json, jsmntok_t* t, int maxTok, int* count, int start) {
+    DeltaRel* ret = palloc(10 * sizeof(DeltaRel));                              // TODO: dynamic size
+    int index = start;
+    int elemSize = 0;
+    *count = 0;
+
+    for (int i = 0; index < maxTok; i++) {
+        if (t[index + 1].type == JSMN_ARRAY) {
+            (ret + i)->relation = sprintf_json(json, &t[index]);
+
+            if (jsoneq(json, &t[index + 3], "name") == 0) {
+                (ret + i)->name = sprintf_json(json, &t[index + 4]);
+            }
+            if (jsoneq(json, &t[index + 5], "type") == 0) {
+                (ret + i)->type = sprintf_json(json, &t[index + 6]);
+            }
+            if (jsoneq(json, &t[index + 7], "elements") == 0) {
+                (ret + i)->elements = getDeltaElems(json, t, index + 8, &elemSize);
+            }
+            *count += 1;
+            index += 8 + elemSize + 1;
+        }
+    }
+    return ret;
+}
+
 char* escape(char* str) {
     int len = strlen(str);
 
@@ -1303,11 +1414,11 @@ char* escape(char* str) {
 
 void clearStats() {
     char* command = palloc(100);
-    char* ret;
+    int ret;
     char tables[5][20] = {"cardinality_stats", "column_stats", "rel_num_stats", "relation_stats", "rel_col_stats"};
 
     for (int i = 0; i < 5; i++) {
-        sprintf(command, "DELETE FROM %s", tables + i);
+        sprintf(command, "DELETE FROM %s", *(tables + i));
 
         SPI_connect();
         ret = SPI_exec(command, 0);

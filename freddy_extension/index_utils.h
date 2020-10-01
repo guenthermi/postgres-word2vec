@@ -149,6 +149,26 @@ typedef struct RelNumData {
     char* value;
 } RelNumData;
 
+typedef struct DeltaElem {
+    const char* name;
+    const char* value;
+} DeltaElem;
+
+typedef struct DeltaCat {
+    const char* name;
+    const char* type;
+    DeltaElem* elements;
+    const char* query;
+    DeltaElem* inferredElements;
+} DeltaCat;
+
+typedef struct DeltaRel {
+    const char* relation;
+    const char* name;
+    const char* type;
+    DeltaElem* elements;
+} DeltaRel;
+
 void updateTopK(TopK tk, float distance, int id, int k, int maxDist);
 
 void updateTopKPV(TopKPV tk, float distance, int id, int k, int maxDist,
@@ -265,6 +285,8 @@ void convert_float4_bytea(float4* input, bytea** output, int size);
 
 int jsoneq(const char *json, jsmntok_t *tok, const char *s);
 
+jsmntok_t* readJsonFile(const char* path, char** json, int* r);
+
 char* sprintf_json(const char* json, jsmntok_t* t);
 
 char* escape(char* str);
@@ -278,6 +300,12 @@ RelationColumnData* getRelationColumnData(const char* json, jsmntok_t* t, int k,
 RelationData* getRelationData(const char* json, jsmntok_t* t, int k, int* relationDataSize);
 
 RelNumData* getRelNumData(const char* json, jsmntok_t* t, int k, int* relNumDataSize);
+
+DeltaElem* getDeltaElems(const char* json, jsmntok_t* t, int k, int* elemSize);
+
+DeltaCat* getDeltaCats(const char* json, jsmntok_t* t, int maxTok, int* count, int* lastIndex);
+
+DeltaRel* getDeltaRels(const char* json, jsmntok_t* t, int maxTok, int* count, int start);
 
 void clearStats(void);
 

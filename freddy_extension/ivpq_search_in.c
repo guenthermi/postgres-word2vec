@@ -65,7 +65,6 @@ Datum ivpq_search_in(PG_FUNCTION_ARGS) {
 
   FuncCallContext *funcctx;
   TupleDesc outtertupdesc;
-  TupleTableSlot *slot;
   AttInMetadata *attinmeta;
   UsrFctxBatch *usrfctx;
 
