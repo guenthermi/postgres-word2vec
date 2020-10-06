@@ -150,7 +150,7 @@ To build the extension you need to install the postgresql-server-dev package ove
 
 ## Index creation
 To use the extension you have to provide word embeddings. The recommendation here is the [word2vec dataset from google news](https://drive.google.com/file/d/0B7XkCwpI5KDYNlNUTTlSS21pQmM/edit?usp=sharing). The scripts for the index creation process are in the "index_creation" folder. You have to download the dataset and put it into a "vectors" folder, which should be created in the root folder in the repository. After that, you can transform it into a text format by running the "transform_vecs.py" script. If you want to use another vector dataset you have to change the path constants in the script.
-Please note also that you have to create the extension before you can execute the index creation scripts. 
+Please note also that you have to create the extension before you can execute the index creation scripts.
 
 ```
 mkdir vectors
@@ -208,6 +208,16 @@ The statistic table used by the operation can be select by the `set_statistics_t
 ```
 SELECT set_statistics_table('stat_google_vecs_norm_word')
 ```
+
+## Troubleshooting
+
+The extension is developed for PostgreSQL 10.
+If you what to set it up on version 12, you have to do a few changes in `freddy_extension/ivpq_search_in.c` and `freddy_extension/freddy.c`:
+* The function `CreateTemplateTupleDesc` requires only one argument in newer versions.   The flag `hasoid` (second argument) is not required anymore and should be removed.
+* The function call context `funcctx` do not need a slot anymore. The statements `TupleTableSlot* slot`, `slot = TupleDescGetSlot(outtertupdesc)`, and `funcctx->slot = slot` can be removed.
+* Instead of `TupleGetDatum` the function `HeapTupleGetDatum` should be used, which only requires tuple as an argument.
+
+
 
 ## References
 [FREDDY: Fast Word Embeddings in Database Systems](https://dl.acm.org/citation.cfm?id=3183717)
