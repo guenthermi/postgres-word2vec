@@ -1165,9 +1165,8 @@ jsmntok_t* readJsonFile(const char* path, char** json, int* r) {
 }
 
 char* sprintf_json(const char* json, jsmntok_t* t) {
-    char* s = palloc(t->end - t->start + 1);
+    char* s = palloc0(t->end - t->start + 1);
     sprintf(s, "%.*s", t->end - t->start, json + t->start);
-    s[t->end - t->start] = '\0';
     return s;
 }
 
@@ -1562,4 +1561,73 @@ void updateRelNumDataStatistics(RelNumData* relNumData, int relCount) {
         }
         pfree(command);
     }
+}
+
+RetroConfig* getRetroConfig(const char* json, jsmntok_t* t, int* size) {
+    RetroConfig* ret = palloc(sizeof(RetroConfig));
+    int index = 1;
+
+    *size = t[0].size;
+    for (int i = 0; i < t[0].size; i++) {
+
+        if (jsoneq(json, &t[index], "WE_ORIGINAL_TABLE_NAME") == 0) {
+            ret->weOriginalTableName = sprintf_json(json, &t[index + 1]);
+        } else if (jsoneq(json, &t[index], "RETRO_TABLE_CONFS") == 0) {
+            if (t[index + 1].type == JSMN_ARRAY) {
+                ret->retroTableConfs = palloc(t[index + 1].size * sizeof(char*));
+                for (int j = 0; j < t[index + 1].size; j++) {
+                    ret->retroTableConfs[j] = sprintf_json(json, &t[index + j + 2]);
+                }
+            }
+            index += t[index + 1].size;
+        } else if (jsoneq(json, &t[index], "SCHEMA_GRAPH_PATH") == 0) {
+            ret->schemaGraphPath = sprintf_json(json, &t[index + 1]);
+        } else if (jsoneq(json, &t[index], "SCHEMA_JSON_GRAPH_PATH") == 0) {
+            ret->schemaJsonGraphPath = sprintf_json(json, &t[index + 1]);
+        } else if (jsoneq(json, &t[index], "TABLE_BLACKLIST") == 0) {
+            if (t[index + 1].type == JSMN_ARRAY) {
+                ret->tableBlacklist = palloc(t[index + 1].size * sizeof(char*));
+                for (int j = 0; j < t[index + 1].size; j++) {
+                    ret->tableBlacklist[j] = sprintf_json(json, &t[index + j + 2]);
+                }
+            }
+            index += t[index + 1].size;
+        } else if (jsoneq(json, &t[index], "COLUMN_BLACKLIST") == 0) {
+            if (t[index + 1].type == JSMN_ARRAY) {
+                ret->columnBlacklist = palloc(t[index + 1].size * sizeof(char*));
+                for (int j = 0; j < t[index + 1].size; j++) {
+                    ret->columnBlacklist[j] = sprintf_json(json, &t[index + j + 2]);
+                }
+            }
+            index += t[index + 1].size;
+        } else if (jsoneq(json, &t[index], "RELATION_BLACKLIST") == 0) {
+            if (t[index + 1].type == JSMN_ARRAY) {
+                ret->relationBlacklist = palloc(t[index + 1].size * sizeof(char*));
+                for (int j = 0; j < t[index + 1].size; j++) {
+                    ret->relationBlacklist[j] = sprintf_json(json, &t[index + j + 2]);
+                }
+            }
+            index += t[index + 1].size;
+        } else if (jsoneq(json, &t[index], "OUTPUT_FOLDER") == 0) {
+            ret->outputFolder = sprintf_json(json, &t[index + 1]);
+        } else if (jsoneq(json, &t[index], "GROUPS_FILE_NAME") == 0) {
+            ret->groupsFileName = sprintf_json(json, &t[index + 1]);
+        } else if (jsoneq(json, &t[index], "ITERATIONS") == 0) {
+            ret->iterations = strtol(sprintf_json(json, &t[index + 1]), NULL, 10);
+        } else if (jsoneq(json, &t[index], "RETRO_VECS_FILE_NAME") == 0) {
+            ret->retroVecsFileName = sprintf_json(json, &t[index + 1]);
+        } else if (jsoneq(json, &t[index], "TOKENIZATION") == 0) {
+            ret->tokenization = sprintf_json(json, &t[index + 1]);
+        } else if (jsoneq(json, &t[index], "ALPHA") == 0) {
+            ret->alpha = strtol(sprintf_json(json, &t[index + 1]), NULL, 10);
+        } else if (jsoneq(json, &t[index], "BETA") == 0) {
+            ret->beta = strtol(sprintf_json(json, &t[index + 1]), NULL, 10);
+        } else if (jsoneq(json, &t[index], "GAMMA") == 0) {
+            ret->gamma = strtol(sprintf_json(json, &t[index + 1]), NULL, 10);
+        } else if (jsoneq(json, &t[index], "DELTA") == 0) {
+            ret->delta = strtol(sprintf_json(json, &t[index + 1]), NULL, 10);
+        }
+        index += 2;
+    }
+    return ret;
 }

@@ -2182,3 +2182,30 @@ Datum parseDeltaGroups(PG_FUNCTION_ARGS) {
 
     PG_RETURN_INT32(0);
 }
+
+PG_FUNCTION_INFO_V1(run_retrofitting);
+
+Datum run_retrofitting(PG_FUNCTION_ARGS) {
+    int r;
+    char* JSON_STRING;
+    jsmntok_t* t;
+
+    int retroConfigSize;
+    RetroConfig* retroConfig;
+
+    const char* path = GET_STR(PG_GETARG_DATUM(0));
+    t = readJsonFile(path, &JSON_STRING, &r);
+
+    if (r < 0) {
+        PG_RETURN_INT32(2);
+        return 0;
+    }
+    if (r < 1 || t[0].type != JSMN_OBJECT) {
+        PG_RETURN_INT32(3);
+        return 0;
+    }
+
+    retroConfig = getRetroConfig(JSON_STRING, t, &retroConfigSize);
+
+    PG_RETURN_INT32(0);
+}

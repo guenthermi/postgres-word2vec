@@ -394,6 +394,10 @@ CREATE OR REPLACE FUNCTION parseDeltaGroups(varchar(200)) RETURNS integer
 AS '$libdir/freddy', 'parseDeltaGroups'
 LANGUAGE C IMMUTABLE STRICT;
 
+CREATE OR REPLACE FUNCTION run_retrofitting(varchar(200)) RETURNS integer
+AS '$libdir/freddy', 'run_retrofitting'
+LANGUAGE C IMMUTABLE STRICT;
+
 CREATE OR REPLACE FUNCTION k_nearest_neighbour(input_vector bytea, k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;

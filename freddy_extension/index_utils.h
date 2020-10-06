@@ -169,6 +169,25 @@ typedef struct DeltaRel {
     DeltaElem* elements;
 } DeltaRel;
 
+typedef struct RetroConfig {
+    const char* weOriginalTableName;
+    const char** retroTableConfs;
+    const char* schemaGraphPath;
+    const char* schemaJsonGraphPath;
+    const char** tableBlacklist;
+    const char** columnBlacklist;
+    const char** relationBlacklist;
+    const char* outputFolder;
+    const char* groupsFileName;
+    int iterations;
+    const char* retroVecsFileName;
+    const char* tokenization;
+    int alpha;
+    int beta;
+    int gamma;
+    int delta;
+} RetroConfig;
+
 void updateTopK(TopK tk, float distance, int id, int k, int maxDist);
 
 void updateTopKPV(TopKPV tk, float distance, int id, int k, int maxDist,
@@ -318,6 +337,8 @@ char* updateRelColStatistics(struct RelationColumnData* relationColumnData);
 void updateRelationStatistics(struct RelationData* relationData, int count);
 
 void updateRelNumDataStatistics(RelNumData* relNumData, int relCount);
+
+RetroConfig* getRetroConfig(const char* json, jsmntok_t* t, int* count);
 
 static inline float computePQDistanceInt16(float* preDists, int16* codes,
                                     int cbPositions, int cbCodes) {
