@@ -173,7 +173,7 @@ Datum pq_search(PG_FUNCTION_ARGS) {
     snprintf(usrfctx->values[1], 16, "%f", usrfctx->tk[usrfctx->iter].distance);
     usrfctx->iter++;
     outTuple = BuildTupleFromCStrings(funcctx->attinmeta, usrfctx->values);
-    result = TupleGetDatum(funcctx->slot, outTuple);
+    result = HeapTupleGetDatum(outTuple);
     SRF_RETURN_NEXT(funcctx, result);
   }
 }
@@ -413,7 +413,7 @@ Datum ivfadc_search(PG_FUNCTION_ARGS) {
     snprintf(usrfctx->values[1], 16, "%f", usrfctx->tk[usrfctx->iter].distance);
     usrfctx->iter++;
     outTuple = BuildTupleFromCStrings(funcctx->attinmeta, usrfctx->values);
-    result = TupleGetDatum(funcctx->slot, outTuple);
+    result = HeapTupleGetDatum(outTuple);
     SRF_RETURN_NEXT(funcctx, result);
   }
 }
@@ -678,7 +678,7 @@ Datum pq_search_in_batch(PG_FUNCTION_ARGS) {
                  .distance);
     usrfctx->iter++;
     outTuple = BuildTupleFromCStrings(funcctx->attinmeta, usrfctx->values);
-    result = TupleGetDatum(funcctx->slot, outTuple);
+    result = HeapTupleGetDatum(outTuple);
     SRF_RETURN_NEXT(funcctx, result);
   }
 }
@@ -1027,7 +1027,7 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS) {
                  .distance);
     usrfctx->iter++;
     outTuple = BuildTupleFromCStrings(funcctx->attinmeta, usrfctx->values);
-    result = TupleGetDatum(funcctx->slot, outTuple);
+    result = HeapTupleGetDatum(outTuple);
     SRF_RETURN_NEXT(funcctx, result);
   }
 }
@@ -1177,7 +1177,7 @@ Datum pq_search_in(PG_FUNCTION_ARGS) {
     snprintf(usrfctx->values[1], 16, "%f", usrfctx->tk[usrfctx->iter].distance);
     usrfctx->iter++;
     outTuple = BuildTupleFromCStrings(funcctx->attinmeta, usrfctx->values);
-    result = TupleGetDatum(funcctx->slot, outTuple);
+    result = HeapTupleGetDatum(outTuple);
     SRF_RETURN_NEXT(funcctx, result);
   }
 }
@@ -1444,7 +1444,7 @@ Datum cluster_pq(PG_FUNCTION_ARGS) {
 
     usrfctx->iter++;
     outTuple = BuildTupleFromCStrings(funcctx->attinmeta, usrfctx->values);
-    result = TupleGetDatum(funcctx->slot, outTuple);
+    result = HeapTupleGetDatum(outTuple);
     SRF_RETURN_NEXT(funcctx, result);
   }
 }
@@ -1671,7 +1671,7 @@ Datum grouping_pq(PG_FUNCTION_ARGS) {
 
     usrfctx->iter++;
     outTuple = BuildTupleFromCStrings(funcctx->attinmeta, usrfctx->values);
-    result = TupleGetDatum(funcctx->slot, outTuple);
+    result = HeapTupleGetDatum(outTuple);
     SRF_RETURN_NEXT(funcctx, result);
   }
 }

@@ -715,7 +715,7 @@ Datum ivpq_search_in(PG_FUNCTION_ARGS) {
                  .distance);
     usrfctx->iter++;
     outTuple = BuildTupleFromCStrings(funcctx->attinmeta, usrfctx->values);
-    result = TupleGetDatum(funcctx->slot, outTuple);
+    result = HeapTupleGetDatum(outTuple);
     SRF_RETURN_NEXT(funcctx, result);
   }
 }
