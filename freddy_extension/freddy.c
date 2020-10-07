@@ -10,7 +10,7 @@
 #include "stdio.h"
 #include "stdlib.h"
 #include "time.h"
-#include "utils/lsyscache.h"        // TODO: remove? war vorher nicht noetig....warum jetzt????
+#include "utils/lsyscache.h"
 
 #include "hashmap.h"
 
@@ -21,6 +21,7 @@
 
 #include "index_utils.h"
 #include "output_utils.h"
+#include "retrofitting.h"
 
 #include "assert.h"
 
