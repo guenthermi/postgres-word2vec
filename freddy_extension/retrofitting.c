@@ -76,7 +76,7 @@ ColumnData* getColumnData(const char* json, jsmntok_t* t, int k, int* columnData
                 ret[i].mean = sprintf_json(json, &t[index + 3]);
             }
             if (jsoneq(json, &t[index + 4], "size") == 0) {
-                ret[i].size = sprintf_json(json, &t[index + 5]);                    // TODO:  should be number
+                ret[i].size = strtol(sprintf_json(json, &t[index + 5]), NULL, 10);
             }
         }
     }
@@ -99,7 +99,7 @@ CardinalityData* getCardinalities(const char* json, jsmntok_t* t, int k, int siz
             (ret + i)->value = sprintf_json(json, &t[index]);
         }
         if (t[index + 1].type == JSMN_PRIMITIVE) {
-            (ret + i)->cardinality = sprintf_json(json, &t[index + 1]);
+            (ret + i)->cardinality = strtol(sprintf_json(json, &t[index + 1]), NULL, 10);
         }
     }
     return ret;
@@ -119,10 +119,10 @@ RelationColumnData* getRelationColumnData(const char* json, jsmntok_t* t, int k,
         ret->centroid = sprintf_json(json, &t[k + 4]);
     }
     if (jsoneq(json, &t[k + 5], "size") == 0) {
-        ret->size = sprintf_json(json, &t[k + 6]);
+        ret->size = strtol(sprintf_json(json, &t[k + 6]), NULL, 10);
     }
     if (jsoneq(json, &t[k + 7], "cardinalities") == 0) {
-        ret->cardinalities = getCardinalities(json, t, k + 8, strtol(ret->size, NULL, 10), &cardinalities);
+        ret->cardinalities = getCardinalities(json, t, k + 8, ret->size, &cardinalities);
     }
 
     *count = 8 + cardinalities;
@@ -157,10 +157,10 @@ RelationData* getRelationData(const char* json, jsmntok_t* t, int k, int* relati
                 ret[i].col2 = getRelationColumnData(json, t, index + countCol1 + 7, &countCol2);
             }
             if (jsoneq(json, &t[index + countCol1 + countCol2 + 8], "max_r") == 0) {
-                ret[i].max_r = sprintf_json(json, &t[index + countCol1 + countCol2 + 9]);
+                ret[i].max_r = strtol(sprintf_json(json, &t[index + countCol1 + countCol2 + 9]), NULL, 10);
             }
             if (jsoneq(json, &t[index + countCol1 + countCol2 + 10], "max_c") == 0) {
-                ret[i].max_c = sprintf_json(json, &t[index + countCol1 + countCol2 + 11]);
+                ret[i].max_c = strtol(sprintf_json(json, &t[index + countCol1 + countCol2 + 11]), NULL, 10);
             }
         }
         index += countCol1 + countCol2 + 11;
@@ -185,7 +185,7 @@ RelNumData* getRelNumData(const char* json, jsmntok_t* t, int k, int* relNumData
             ret[i].rel = sprintf_json(json, &t[index]);
         }
         if (t[index + 1].type == JSMN_PRIMITIVE) {
-            ret[i].value = sprintf_json(json, &t[index + 1]);               // TODO:  should be number
+            ret[i].value = strtol(sprintf_json(json, &t[index + 1]), NULL, 10);
         }
     }
     return ret;
@@ -327,7 +327,7 @@ void updateColumnStatistics(ColumnData* columnData, int columnCount) {
         cur = command;
 
         cur += sprintf(
-                cur, "INSERT INTO column_stats (name, mean, size) VALUES ('%s', '%s', %s) "
+                cur, "INSERT INTO column_stats (name, mean, size) VALUES ('%s', '%s', %d) "
                      "ON CONFLICT (name) DO UPDATE SET (mean, size) = (EXCLUDED.mean, EXCLUDED.size)",
                 (columnData + i)->name, (columnData + i)->mean, (columnData + i)->size);
         SPI_connect();
@@ -350,7 +350,7 @@ void updateCardinalityStatistics(struct CardinalityData* cardinalityData, int co
                          + 10);
         cur = command;
         cur += sprintf(
-                cur, "INSERT INTO cardinality_stats (value, cardinality, col_id) VALUES ('%s', %s, %s) ",
+                cur, "INSERT INTO cardinality_stats (value, cardinality, col_id) VALUES ('%s', %d, %s) ",
                 escape((cardinalityData + i)->value), (cardinalityData + i)->cardinality, relColId);
         SPI_connect();
         ret = SPI_exec(command, 0);
@@ -373,7 +373,7 @@ char* updateRelColStatistics(struct RelationColumnData* relationColumnData) {
                      + 10);
     cur = command;
     cur += sprintf(
-            cur, "INSERT INTO rel_col_stats (name, centroid, size) VALUES ('%s', '%s', %s) "
+            cur, "INSERT INTO rel_col_stats (name, centroid, size) VALUES ('%s', '%s', %d) "
                  "RETURNING id",
             escape(relationColumnData->name), escape(relationColumnData->centroid), relationColumnData->size);
 
@@ -390,7 +390,7 @@ char* updateRelColStatistics(struct RelationColumnData* relationColumnData) {
         SPI_finish();
     }
     if (id) {
-        updateCardinalityStatistics(relationColumnData->cardinalities, strtol(relationColumnData->size, NULL, 10), id);
+        updateCardinalityStatistics(relationColumnData->cardinalities, relationColumnData->size, id);
     }
     pfree(command);
     return id;
@@ -413,7 +413,7 @@ void updateRelationStatistics(struct RelationData* relationData, int count) {
                          + 20);
         cur = command;
         cur += sprintf(
-                cur, "INSERT INTO relation_stats (relation_name, name, col1, col2, max_r, max_c) VALUES ('%s', '%s', %s, %s, %s, %s) "
+                cur, "INSERT INTO relation_stats (relation_name, name, col1, col2, max_r, max_c) VALUES ('%s', '%s', %s, %s, %d, %d) "
                      "ON CONFLICT (relation_name) DO UPDATE SET (name, col1, col2, max_r, max_c) = (EXCLUDED.name, EXCLUDED.col1, EXCLUDED.col2, EXCLUDED.max_r, EXCLUDED.max_c)",
                 escape((relationData + i)->relation_name), escape((relationData + i)->name), col1, col2, (relationData + i)->max_r, (relationData + i)->max_c);
         SPI_connect();
@@ -436,7 +436,7 @@ void updateRelNumDataStatistics(RelNumData* relNumData, int relCount) {
                          + 10);
         cur = command;
         cur += sprintf(
-                cur, "INSERT INTO rel_num_stats (rel, value) VALUES ('%s', %s) "
+                cur, "INSERT INTO rel_num_stats (rel, value) VALUES ('%s', %d) "
                      "ON CONFLICT (rel) DO UPDATE SET value = EXCLUDED.value",
                 escape((relNumData + i)->rel), (relNumData + i)->value);
         SPI_connect();

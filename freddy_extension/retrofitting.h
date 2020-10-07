@@ -14,18 +14,18 @@
 typedef struct ColumnData {
     char* name;
     char* mean;
-    char* size;
+    int size;
 } ColumnData;
 
 typedef struct CardinalityData {
     char* value;
-    char* cardinality;
+    int cardinality;
 } CardinalityData;
 
 typedef struct RelationColumnData {
     char* name;
     char* centroid;
-    char* size;
+    int size;
     CardinalityData* cardinalities;
 } RelationColumnData;
 
@@ -34,13 +34,13 @@ typedef struct RelationData {
     char* name;
     RelationColumnData* col1;
     RelationColumnData* col2;
-    char* max_r;
-    char* max_c;
+    int max_r;
+    int max_c;
 } RelationData;
 
 typedef struct RelNumData {
     char* rel;
-    char* value;
+    int value;
 } RelNumData;
 
 typedef struct DeltaElem {
