@@ -18,6 +18,20 @@ END
 $$
 LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION set_original_vecs(original_vecs regclass) RETURNS void AS $$
+BEGIN
+    EXECUTE format('CREATE OR REPLACE FUNCTION get_vecs_name_original() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', original_vecs);
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION set_retro_vecs(retro_vecs regclass) RETURNS void AS $$
+BEGIN
+EXECUTE format('CREATE OR REPLACE FUNCTION get_retro_vecs() RETURNS regclass AS ''SELECT regclass ''''%s'''''' LANGUAGE sql IMMUTABLE', retro_vecs);
+END
+$$
+LANGUAGE plpgsql;
+
 CREATE OR REPLACE FUNCTION set_pvf(f integer) RETURNS void AS $$
 BEGIN
 EXECUTE format('CREATE OR REPLACE FUNCTION get_pvf() RETURNS integer AS ''SELECT %s'' LANGUAGE sql IMMUTABLE', f);
@@ -394,7 +408,7 @@ CREATE OR REPLACE FUNCTION parseDeltaGroups(varchar(200)) RETURNS integer
 AS '$libdir/freddy', 'parseDeltaGroups'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE OR REPLACE FUNCTION run_retrofitting(varchar(200)) RETURNS integer
+CREATE OR REPLACE FUNCTION run_retrofitting(varchar(200), varchar(200)) RETURNS integer
 AS '$libdir/freddy', 'run_retrofitting'
 LANGUAGE C IMMUTABLE STRICT;
 

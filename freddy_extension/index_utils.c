@@ -824,7 +824,8 @@ void getTableName(tableType type, char* name, int bufferSize) {
                                   "get_vecs_name_ivpq_quantization()",
                                   "get_vecs_name_ivpq_codebook()",
                                   "get_vecs_name_coarse_quantization_multi()",
-                                  "get_statistics_table()"};
+                                  "get_statistics_table()",
+                                  "get_retro_vecs()"};
 
   SPI_connect();
 

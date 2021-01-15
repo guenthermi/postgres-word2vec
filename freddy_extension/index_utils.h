@@ -96,7 +96,8 @@ typedef enum {
   IVPQ_QUANTIZATION,
   IVPQ_CODEBOOK,
   COARSE_QUANTIZATION_MULTI,
-  STATISTICS
+  STATISTICS,
+  RETRO_VECS
 } tableType;
 
 typedef enum { PARAM_PVF, PARAM_W } parameterType;

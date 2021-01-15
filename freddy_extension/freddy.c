@@ -2187,26 +2187,90 @@ Datum parseDeltaGroups(PG_FUNCTION_ARGS) {
 PG_FUNCTION_INFO_V1(run_retrofitting);
 
 Datum run_retrofitting(PG_FUNCTION_ARGS) {
-    int r;
-    char* JSON_STRING;
-    jsmntok_t* t;
+    elog(INFO, "started");
 
+    char* configJson;
+    jsmntok_t* configTokens;
+    int configTokenCount = 0;
     int retroConfigSize;
     RetroConfig* retroConfig;
 
-    const char* path = GET_STR(PG_GETARG_DATUM(0));
-    t = readJsonFile(path, &JSON_STRING, &r);
+    int deltaTokenCount = 0;
+    char* deltaJson;
+    jsmntok_t* deltaTokens;
+    int endCat;
+    int deltaCatCount;
+    DeltaCat* deltaCat;
+    int deltaRelCount;
+    DeltaRel* deltaRel;
 
-    if (r < 0) {
+    int processedDeltaCount = 0;
+    ProcessedDeltaEntry* processedDelta;
+
+    int retroVecsSize = 0;
+    char* retroTableName = palloc0(100);
+    WordVec* retroVecs;
+
+    elog(INFO, "read config");
+    const char* configPath = GET_STR(PG_GETARG_DATUM(0));
+    configTokens = readJsonFile(configPath, &configJson, &configTokenCount);
+    if (configTokenCount < 0) {
         PG_RETURN_INT32(2);
         return 0;
     }
-    if (r < 1 || t[0].type != JSMN_OBJECT) {
+    if (configTokenCount < 1 || configTokens[0].type != JSMN_OBJECT) {
         PG_RETURN_INT32(3);
         return 0;
     }
+    retroConfig = getRetroConfig(configJson, configTokens, &retroConfigSize);
 
-    retroConfig = getRetroConfig(JSON_STRING, t, &retroConfigSize);
+    elog(INFO, "read delta file");
+    const char* path = GET_STR(PG_GETARG_DATUM(1));
+    deltaTokens = readJsonFile(path, &deltaJson, &deltaTokenCount);
+    if (deltaTokenCount < 0) {
+        PG_RETURN_INT32(2);
+        return 0;
+    }
+    if (deltaTokenCount < 1 || deltaTokens[0].type != JSMN_OBJECT) {
+        PG_RETURN_INT32(3);
+        return 0;
+    }
+    deltaCat = getDeltaCats(deltaJson, deltaTokens, deltaTokenCount, &deltaCatCount, &endCat);
+    deltaRel = getDeltaRels(deltaJson, deltaTokens, deltaTokenCount, &deltaRelCount, endCat);
 
+
+    processedDelta = processDelta(deltaCat, deltaCatCount, deltaRel, deltaRelCount, &processedDeltaCount);
+
+    getTableName(RETRO_VECS, retroTableName, 100);
+    retroVecs = getWordVecs(retroTableName, &retroVecsSize);
+
+    for (int i = 0; i < processedDeltaCount; ++i) {
+        for (int j = 0; j < retroVecsSize; ++j) {
+            if (strcmp(processedDelta[i].name, retroVecs[j].word) == 0) {
+                retroVecs[i] = retroVecs[retroVecsSize - 1];
+                retroVecsSize--;
+                pfree(retroVecs[retroVecsSize - 1].word);
+                pfree(retroVecs[retroVecsSize - 1].vector);
+            }
+        }
+    }
+
+    retroVecs = addMissingVecs(retroVecs, &retroVecsSize, processedDelta, processedDeltaCount, retroConfig->tokenization);
+    elog(INFO, "FINISHED ADDING");
+
+    int newVecsSize = 0;
+    float delta = 0;
+    for (int i = 0; i < retroConfig->iterations; i++) {
+        WordVec* newVecs = calcRetroVecs(processedDelta, processedDeltaCount, retroVecs, retroVecsSize, retroConfig, &newVecsSize);
+        delta = calcDelta(retroVecs, retroVecsSize, newVecs, newVecsSize);
+        updateRetroVecs(retroVecs, retroVecsSize, newVecs, newVecsSize);
+        delta = calcDelta(retroVecs, retroVecsSize, newVecs, newVecsSize);
+    }
+
+//                ereport(ERROR,
+//                        (errcode(ERRCODE_DIVISION_BY_ZERO),
+//                                errmsg("division by zero")));
+
+    elog(INFO, "finished");
     PG_RETURN_INT32(0);
 }
