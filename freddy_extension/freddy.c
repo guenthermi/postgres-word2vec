@@ -7,6 +7,7 @@
 #include "fmgr.h"
 #include "utils/array.h"
 #include "utils/arrayaccess.h"
+#include "utils/lsyscache.h"
 #include "stdio.h"
 #include "stdlib.h"
 #include "time.h"

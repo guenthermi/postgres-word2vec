@@ -62,7 +62,7 @@ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION  set_long_codes_threshold(threshold integer) RETURNS void AS $$
 BEGIN
-EXECUTE format('CREATE OR REPLACE FUNCTION get_long_codes_threshold() RETURNS float4 AS ''SELECT ''''%s''''::float4'' LANGUAGE sql IMMUTABLE', threshold);
+EXECUTE format('CREATE OR REPLACE FUNCTION get_long_codes_threshold() RETURNS integer AS ''SELECT ''''%s''''::int'' LANGUAGE sql IMMUTABLE', threshold);
 END
 $$
 LANGUAGE plpgsql;
@@ -137,21 +137,6 @@ IF init_done = 0 AND number_tables = 10 THEN
 END IF;
 END$$;
 
-SELECT set_pvf(20);
-SELECT set_w(3);
-SELECT set_alpha(3);
-SELECT set_confidence_value(0.8);
-SELECT set_long_codes_threshold(10000000);
-SELECT set_method_flag(0);
-SELECT set_use_targetlist('true');
-SELECT set_knn_function('k_nearest_neighbour');
-SELECT set_knn_in_function('knn_in_exact');
-SELECT set_knn_batch_function('k_nearest_neighbour_ivfadc_batch');
-SELECT set_analogy_function('analogy_3cosadd');
-SELECT set_analogy_in_function('analogy_3cosadd_in');
-SELECT set_groups_function('grouping_func');
-SELECT set_knn_join_function('knn_in_ivpq_batch');
-
 CREATE OR REPLACE FUNCTION create_statistics(table_name varchar, column_name varchar, coarse_table_name varchar)  RETURNS void AS $$
 DECLARE
 ivpq_quantization varchar;
@@ -174,6 +159,32 @@ END LOOP;
 END
 $$
 LANGUAGE plpgsql;
+
+DO $$
+DECLARE
+stat_table_present int;
+BEGIN
+EXECUTE 'SELECT count(*) FROM information_schema.tables WHERE table_schema=''public'' AND table_type=''BASE TABLE'' AND table_name in (''stat_google_vecs_norm_word'')' INTO stat_table_present;
+IF stat_table_present = 0 THEN
+  EXECUTE 'SELECT create_statistics(''google_vecs_norm'', ''word'', ''coarse_quantization_ivpq'')';
+END IF;
+END $$;
+
+SELECT set_pvf(20);
+SELECT set_w(3);
+SELECT set_alpha(3);
+SELECT set_confidence_value(0.8);
+SELECT set_long_codes_threshold(10000000);
+SELECT set_method_flag(0);
+SELECT set_use_targetlist('true');
+SELECT set_knn_function('k_nearest_neighbour');
+SELECT set_knn_in_function('knn_in_exact');
+SELECT set_knn_batch_function('k_nearest_neighbour_ivfadc_batch');
+SELECT set_analogy_function('analogy_3cosadd');
+SELECT set_analogy_in_function('analogy_3cosadd_in');
+SELECT set_groups_function('grouping_func');
+SELECT set_knn_join_function('knn_in_ivpq_batch');
+SELECT set_statistics_table('stat_google_vecs_norm_word');
 
 CREATE OR REPLACE FUNCTION knn(query varchar(100), k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
@@ -203,7 +214,7 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION knn_batch(query_set varchar(100)[], k integer) RETURNS TABLE (query varchar(100), target varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION knn_batch(query_set varchar(100)[], k integer) RETURNS TABLE (query varchar(100), target varchar(100), similarity float4) AS $$
 DECLARE
 function_name varchar;
 formated varchar[];
@@ -219,7 +230,7 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION knn_join(query_set varchar(100)[], k integer, target_set varchar(100)[]) RETURNS TABLE (query varchar(100), target varchar(100), squareDistance float4) AS $$
+CREATE OR REPLACE FUNCTION knn_join(query_set varchar(100)[], k integer, target_set varchar(100)[]) RETURNS TABLE (query varchar(100), target varchar(100), similarity float4) AS $$
 DECLARE
 function_name varchar;
 formated varchar[];
@@ -338,7 +349,7 @@ CREATE OR REPLACE FUNCTION pq_search_in(bytea, integer, integer[]) RETURNS SETOF
 AS '$libdir/freddy', 'pq_search_in'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE OR REPLACE FUNCTION ivpq_search_in(bytea[], integer[], integer, integer[], integer, integer, integer, boolean, float4, integer) RETURNS SETOF record
+  CREATE OR REPLACE FUNCTION ivpq_search_in(bytea[], integer[], integer, integer[], integer, integer, integer, boolean, float4, integer) RETURNS SETOF record
 AS '$libdir/freddy', 'ivpq_search_in'
 LANGUAGE C IMMUTABLE STRICT;
 
@@ -539,9 +550,8 @@ END
 $$
 LANGUAGE plpgsql;
 
--- TODO ADAPT
 -- with postverification
-CREATE OR REPLACE FUNCTION k_nearest_neighbour_pq_pv(input_vector anyarray, k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
+CREATE OR REPLACE FUNCTION k_nearest_neighbour_pq_pv(input_vector bytea, k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 pq_quantization_name varchar;
 post_verif integer;
@@ -549,17 +559,16 @@ BEGIN
 EXECUTE 'SELECT get_vecs_name_pq_quantization()' INTO pq_quantization_name;
 EXECUTE 'SELECT get_pvf()' INTO post_verif;
 RETURN QUERY EXECUTE format('
-SELECT pqs.word AS word, cosine_similarity_bytea(''%s''::float4[], pqs.word) AS similarity
-FROM pq_search(''%s''::float4[], %s) AS (idx integer, distance float4)
+SELECT pqs.word AS word, cosine_similarity_bytea(''%s'', pqs.word) AS similarity
+FROM pq_search(''%s'', %s) AS (idx integer, distance float4)
 INNER JOIN %s AS pqs ON idx = pqs.id
-ORDER BY cosine_similarity_bytea(''%s''::float4[], pqs.word) DESC
+ORDER BY cosine_similarity_bytea(''%s'', pqs.word) DESC
 FETCH FIRST %s ROWS ONLY
-', input_vector, post_verif*k, pq_quantization_name, input_vector, k);
+', input_vector, input_vector, post_verif*k, pq_quantization_name, input_vector, k);
 END
 $$
 LANGUAGE plpgsql;
 
--- TODO ADAPT
 CREATE OR REPLACE FUNCTION k_nearest_neighbour_pq_pv(token varchar(100), k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;
@@ -607,12 +616,17 @@ post_verif integer;
 alpha integer;
 method_flag integer;
 use_targetlist boolean;
+confidence real;
+double_threshold integer;
+
 BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 EXECUTE 'SELECT get_pvf()' INTO post_verif;
 EXECUTE 'SELECT get_alpha()' INTO alpha;
 EXECUTE 'SELECT get_method_flag()' INTO method_flag;
 EXECUTE 'SELECT get_use_targetlist()' INTO use_targetlist;
+EXECUTE 'SELECT get_confidence_value()' INTO confidence;
+EXECUTE 'SELECT get_long_codes_threshold()' INTO double_threshold;
 
 FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
   formated[I] = replace(input_set[I], '''', '''''');
@@ -622,12 +636,12 @@ RETURN QUERY EXECUTE format('
 SELECT f.word, (1.0 - (distance / 2.0))::float4 as similarity
 FROM ivpq_search_in(
   ARRAY(SELECT vector FROM %s WHERE word = ''%s''),
-  ''{0}'',
+  ''{0}''::int[],
   ''%s''::int,
   ARRAY(SELECT id FROM %s WHERE word = ANY(''%s''::varchar(100)[])),
-  %s, %s, %s, ''%s'')
+  %s, %s, %s, ''%s''::boolean, ''%s''::float4, ''%s''::int)
   AS (qid integer, tid integer, distance float4) INNER JOIN %s AS f ON tid = f.id;
-', table_name, replace(token, '''', ''''''), k, table_name, formated, alpha, post_verif, method_flag, use_targetlist, table_name);
+', table_name, replace(token, '''', ''''''), k, table_name, formated, alpha, post_verif, method_flag, use_targetlist, confidence, double_threshold, table_name);
 END
 $$
 LANGUAGE plpgsql;
@@ -1105,6 +1119,51 @@ AND (pqs.word != v3.word)
 ORDER BY cosine_similarity_bytea(vec_plus_bytea(vec_minus_bytea(v3.vector, v1.vector), v2.vector), v4.vector) DESC
 FETCH FIRST 1 ROWS ONLY
 ', table_name, table_name, table_name, post_verif+3, pq_quantization_name, formated, pq_quantization_name, table_name, replace(w1, '''', ''''''), replace(w2, '''', ''''''), replace(w3, '''', ''''''), formated) INTO result;
+END
+$$
+LANGUAGE plpgsql;
+
+-- TODO analogy_3cosadd_in_ivpq
+CREATE OR REPLACE FUNCTION analogy_3cosadd_in_ivpq(w1 varchar(100), w2 varchar(100), w3 varchar(100), input_set varchar(100)[], OUT result varchar(100))
+AS  $$
+DECLARE
+table_name varchar;
+formated varchar[];
+post_verif integer;
+alpha integer;
+method_flag integer;
+use_targetlist boolean;
+confidence real;
+double_threshold integer;
+BEGIN
+EXECUTE 'SELECT get_vecs_name()' INTO table_name;
+EXECUTE 'SELECT get_pvf()' INTO post_verif;
+EXECUTE 'SELECT get_alpha()' INTO alpha;
+EXECUTE 'SELECT get_method_flag()' INTO method_flag;
+EXECUTE 'SELECT get_use_targetlist()' INTO use_targetlist;
+EXECUTE 'SELECT get_confidence_value()' INTO confidence;
+EXECUTE 'SELECT get_long_codes_threshold()' INTO double_threshold;
+
+FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
+  formated[I] = replace(input_set[I], '''', '''''');
+END LOOP;
+EXECUTE format('
+SELECT pqs.word FROM
+%s AS v1,
+%s AS v2,
+%s AS v3,
+ivpq_search_in(ARRAY(SELECT vec_normalize_bytea(vec_plus_bytea(vec_minus_bytea(v3.vector, v1.vector), v2.vector))), ''{0}''::int[], %s, ARRAY(SELECT id FROM %s WHERE word = ANY (''%s''::varchar(100)[])), %s, %s, %s, ''%s''::boolean, ''%s''::float4, ''%s''::int) AS (qid integer, idx integer, distance float4)
+INNER JOIN %s AS pqs ON idx = pqs.id
+INNER JOIN %s AS v4 ON v4.word = pqs.word
+WHERE (v1.word = ''%s'')
+AND (v2.word = ''%s'')
+AND (v3.word = ''%s'')
+AND (pqs.word != v1.word)
+AND (pqs.word != v2.word)
+AND (pqs.word != v3.word)
+ORDER BY cosine_similarity_bytea(vec_plus_bytea(vec_minus_bytea(v3.vector, v1.vector), v2.vector), v4.vector) DESC
+FETCH FIRST 1 ROWS ONLY
+', table_name, table_name, table_name, 4, table_name, formated, alpha, post_verif, method_flag, use_targetlist, confidence, double_threshold, table_name, table_name, replace(w1, '''', ''''''), replace(w2, '''', ''''''), replace(w3, '''', ''''''), formated) INTO result;
 END
 $$
 LANGUAGE plpgsql;
