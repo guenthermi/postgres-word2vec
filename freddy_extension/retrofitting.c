@@ -1440,7 +1440,7 @@ WordVec* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processedDeltaCo
 
             memcpy(delta, centroid, dim * sizeof(float4));
             pfree(centroid);
-            multVecF(delta, retroConfig->delta * 2 / (max_c * (max_r + 1)), dim);
+            multVecF(delta, (float)retroConfig->delta * 2 / (max_c * (max_r + 1)), dim);
             subVecs(nominator, delta, dim);
             sprintf(query, "SELECT size FROM rel_col_stats WHERE id = (SELECT %s FROM relation_stats WHERE relation_name = '%s')",
                     relation.target, relation.key);
