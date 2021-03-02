@@ -632,6 +632,47 @@ int getIntFromDB(char* query) {
     return result;
 }
 
+char* getJoinRelFromDB(char* table, char* foreign_table) {
+    char* command;
+    ResultInfo rInfo;
+    char* result = NULL;
+
+    SPI_connect();
+    command = palloc0(1000);
+    sprintf(command, "SELECT tc.table_name, kcu.column_name, ccu.table_name AS foreign_table_name, ccu.column_name AS foreign_column_name "
+                     "FROM information_schema.table_constraints AS tc "
+                     "JOIN information_schema.key_column_usage AS kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema "
+                     "JOIN information_schema.constraint_column_usage AS ccu ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema "
+                     "WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_name = '%s' AND ccu.table_name = '%s'",
+                     table, foreign_table);
+    rInfo.ret = SPI_execute(command, true, 0);
+    rInfo.proc = SPI_processed;
+
+    if (rInfo.ret == SPI_OK_SELECT && rInfo.proc > 0 && SPI_tuptable != NULL) {
+        TupleDesc tupdesc = SPI_tuptable->tupdesc;
+        SPITupleTable *tuptable = SPI_tuptable;
+
+        char* table;
+        char* col;
+        char* fTable;
+        char* fCol;
+
+        HeapTuple tuple = tuptable->vals[0];
+        table = SPI_getvalue(tuple, tupdesc, 1);
+        col = SPI_getvalue(tuple, tupdesc, 2);
+        fTable = SPI_getvalue(tuple, tupdesc, 3);
+        fCol = SPI_getvalue(tuple, tupdesc, 4);
+
+        int length = strlen(table) + strlen(col) + strlen(fTable) + strlen(fCol) + 5 + 1;
+        result = SPI_palloc(length);
+        snprintf(result, length, "%s.%s = %s.%s", table, col, fTable, fCol);
+    }
+    SPI_finish();
+
+    return result;
+}
+
+
 float* calcColMean(char* tableName, char* column, char* vecTable, const char* tokenization, int dim) {
     // TODO: not exactly right but very close
     char* command;
@@ -736,7 +777,7 @@ void insertColMeanToDB(char* tabCol, float* mean, const char* tokenization, int 
         }
         sprintf(cur, "}'::float4[]), '%s')", tokenization);
 
-        rInfo.ret = SPI_execute(command, false, 0);
+        rInfo.ret = SPI_exec(command, 0);
         if (rInfo.ret != SPI_OK_INSERT) {
             elog(WARNING, "Failed to insert col mean vector!");
         }
@@ -803,39 +844,54 @@ float* calcCentroid(ProcessedRel* relation, char* retroVecTable, int dim) {
     float* sum = palloc0(dim * sizeof(float));
 
     SPI_connect();
-
-    char** relKeys = getTableAndColFromRel(relation->key);
+    char* joinRel = NULL;
     char* selector;
-    if (strcmp(relation->target, "col1") == 0) {
-        selector = palloc0(strlen(relKeys[0]) + strlen(relKeys[1]) + 2);
-        sprintf(selector, "%s.%s", relKeys[0], relKeys[1]);
-    } else {
-        selector = palloc0(strlen(relKeys[2]) + strlen(relKeys[3]) + 2);
-        sprintf(selector, "%s.%s", relKeys[2], relKeys[3]);
-    }
-
-    char* tableName1 = relKeys[0];
-    char* tableName2 = relKeys[2];
-
+    char* tableName1;
+    char* tableName2;
+    char* innerSelect = palloc0(300);
 
     char* command = palloc0(500);
     ResultInfo rInfo;
     float4* tmp;
 
-    char* tab2WithoutS = palloc0(strlen(tableName2));           // TODO: doesnt work with categories -> category    --> find better solution
-    strcpy(tab2WithoutS, tableName2);
-    tab2WithoutS[strlen(tab2WithoutS) - 1] = '\0';
+    char** relKeys = getTableAndColFromRel(relation->key);
+
+    tableName1 = relKeys[0];
+    tableName2 = relKeys[2];
+
+    if (strcmp(relation->target, "col1") == 0) {
+        selector = palloc0(strlen(relKeys[0]) + strlen(relKeys[1]) + 2);
+        sprintf(selector, "%s.%s", relKeys[0], relKeys[1]);
+
+        if (strcmp(relKeys[4], "-") != 0) {
+            tableName1 = relKeys[4];
+            tableName2 = relKeys[0];
+            joinRel = getJoinRelFromDB(relKeys[4], relKeys[0]);
+        }
+    } else {
+        selector = palloc0(strlen(relKeys[2]) + strlen(relKeys[3]) + 2);
+        sprintf(selector, "%s.%s", relKeys[2], relKeys[3]);
+
+        if (strcmp(relKeys[4], "-") != 0) {
+            tableName1 = relKeys[4];
+            tableName2 = relKeys[2];
+            joinRel = getJoinRelFromDB(relKeys[4], relKeys[2]);
+        }
+    }
+
+    if (joinRel == NULL) {
+        joinRel = getJoinRelFromDB(relKeys[0], relKeys[2]);
+    }
+
+    sprintf(innerSelect, "SELECT regexp_replace(%s, '[\\.#~\\s\\u00a0,\\(\\)/\\[\\]:]+', '_', 'g') AS term "
+                         "FROM %s INNER JOIN %s ON %s", selector, tableName1, tableName2, joinRel);
 
     sprintf(command, "SELECT vector FROM ("
                      "SELECT DISTINCT * "
-                     "FROM %s AS rtv JOIN (SELECT regexp_replace(%s, '[\\.#~\\s\\u00a0,\\(\\)/\\[\\]:]+', '_', 'g') AS term "
-                     "                      FROM %s INNER JOIN %s ON %s.%s_id = %s.id) as sub "
+                     "FROM %s AS rtv JOIN (%s) as sub "
                      "ON rtv.word = CONCAT('%s#', sub.term) "
                      ") as res",
-            retroVecTable, selector, tableName1, tableName2, tableName1, tab2WithoutS, tableName2, selector);
-    // TODO: might not work with apps.name~genres.name:apps_genres
-    // TODO: also maybe dynamic 'selector'
-    // TODO: switch tabCol1 for which col is needed (1 or 2)
+            retroVecTable, innerSelect, selector);
 
     rInfo.ret = SPI_exec(command, 0);
     rInfo.proc = SPI_processed;
@@ -1279,13 +1335,13 @@ void printVec(float* vec, int dim) {
 
 char** getNTok(char* word, char* delim, int size) {             // TODO: integrate with getTok()
     char* s = palloc0(strlen(word) + 1);
-    strcpy(s, word);
+    strncpy(s, word, strlen(word));
     char** result = palloc0(size * sizeof(char*));
 
     int i = 0;
     for (char* p = strtok(s, delim); p != NULL; p = strtok(NULL, delim)) {
         result[i] = palloc0(strlen(p) + 1);
-        strcpy(result[i], p);
+        strncpy(result[i], p, strlen(p));
         i++;
     }
     return result;
@@ -1300,18 +1356,17 @@ char** getTableAndCol(char* word) {             // TODO: remove maybe
 }
 
 char** getTableAndColFromRel(char* word) {
-    char* s = palloc0(strlen(word) + 1);
-    strcpy(s, word);
-    char** result = palloc0(4 * sizeof(char*));
+    char** result = palloc0(5 * sizeof(char*));
     char** tmp = palloc0(2 * sizeof(char*));
-
     char** tabs = getNTok(word, "~", 2);
-    result = getNTok(tabs[0], ".", 2);
-    tmp = getNTok(tabs[1], ":", 2);
-    tmp = getNTok(tmp[0], ".", 2);
-
+    tmp = getNTok(tabs[0], ".", 2);
+    result[0] = tmp[0];
+    result[1] = tmp[1];
+    tmp = getNTok(tabs[1], ".", 2);
     result[2] = tmp[0];
-    result[3] = tmp[1];
+    tmp = getNTok(tmp[1], ":", 2);
+    result[3] = tmp[0];
+    result[4] = tmp[1];
 
     return result;
 }
