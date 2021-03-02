@@ -145,15 +145,15 @@ DeltaRel* getDeltaRels(const char* json, jsmntok_t* t, int maxTok, int* count, i
 
 void clearStats(void);
 
-void updateColumnStatistics(ColumnData* columnData, int columnCount);
+void insertColumnStatistics(ColumnData* columnData, int columnCount);
 
 void updateCardinalityStatistics(struct CardinalityData* cardinalityData, int count, char* relColId);
 
 char* updateRelColStatistics(struct RelationColumnData* relationColumnData);
 
-void updateRelationStatistics(struct RelationData* relationData, int count);
+void insertRelationStatistics(struct RelationData* relationData, int count);
 
-void updateRelNumDataStatistics(RelNumData* relNumData, int relCount);
+void insertRelNumDataStatistics(RelNumData* relNumData, int relCount);
 
 RetroConfig* getRetroConfig(const char* json, jsmntok_t* t, int* count);
 

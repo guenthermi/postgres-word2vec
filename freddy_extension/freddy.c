@@ -2145,9 +2145,9 @@ Datum add_online_retrofitting_statistics(PG_FUNCTION_ARGS) {
     }
 
     clearStats();
-    updateColumnStatistics(columnData, columnDataSize);
-    updateRelationStatistics(relationData, relationDataSize);
-    updateRelNumDataStatistics(relNumData, relNumDataSize);
+    insertColumnStatistics(columnData, columnDataSize);
+    insertRelationStatistics(relationData, relationDataSize);
+    insertRelNumDataStatistics(relNumData, relNumDataSize);
 
     PG_RETURN_INT32(0);
 }

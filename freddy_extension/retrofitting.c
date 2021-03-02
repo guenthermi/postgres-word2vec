@@ -326,7 +326,7 @@ void clearStats() {
     pfree(command);
 }
 
-void updateColumnStatistics(ColumnData* columnData, int columnCount) {
+void insertColumnStatistics(ColumnData* columnData, int columnCount) {
     char* command;
     char* cur;
     int ret;
@@ -404,7 +404,7 @@ char* updateRelColStatistics(struct RelationColumnData* relationColumnData) {
     return id;
 }
 
-void updateRelationStatistics(struct RelationData* relationData, int count) {
+void insertRelationStatistics(struct RelationData* relationData, int count) {
     char* col1;
     char* col2;
     char* command;
@@ -431,7 +431,7 @@ void updateRelationStatistics(struct RelationData* relationData, int count) {
     }
 }
 
-void updateRelNumDataStatistics(RelNumData* relNumData, int relCount) {
+void insertRelNumDataStatistics(RelNumData* relNumData, int relCount) {
     char* command;
     char* cur;
     int ret;
