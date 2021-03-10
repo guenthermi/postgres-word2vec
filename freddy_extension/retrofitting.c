@@ -133,7 +133,7 @@ RelationColumnData* getRelationColumnData(const char* json, jsmntok_t* t, int k,
 }
 
 RelationData* getRelationData(const char* json, jsmntok_t* t, int k, int* relationDataSize) {
-    static RelationData ret[10];                    // TODO: size??
+    RelationData* ret = palloc0(sizeof(RelationData) * t[k].size);
     int index = k;
     int countCol1 = 0;
     int countCol2 = 0;
@@ -195,7 +195,7 @@ RelNumData* getRelNumData(const char* json, jsmntok_t* t, int k, int* relNumData
 }
 
 DeltaElem* getDeltaElems(const char* json, jsmntok_t* t, int k, int* elemSize) {
-    DeltaElem* ret = palloc(t[k].size * sizeof(DeltaElem));                              // TODO: dynamic size
+    DeltaElem* ret = palloc0(t[k].size * sizeof(DeltaElem));
     int index;
 
     if (t[k].type != JSMN_OBJECT) {
@@ -219,7 +219,7 @@ DeltaElem* getDeltaElems(const char* json, jsmntok_t* t, int k, int* elemSize) {
 }
 
 DeltaCat* getDeltaCats(const char* json, jsmntok_t* t, int maxTok, int* count, int* lastIndex) {
-    DeltaCat* ret = palloc0(maxTok * sizeof(DeltaCat));                              // TODO: dynamic size
+    DeltaCat* ret = palloc0(maxTok * sizeof(DeltaCat));
     int index = 1;
     int elemSize = 0;
     int infElemSize = 0;
@@ -254,7 +254,7 @@ DeltaCat* getDeltaCats(const char* json, jsmntok_t* t, int maxTok, int* count, i
 }
 
 DeltaRel* getDeltaRels(const char* json, jsmntok_t* t, int maxTok, int* count, int start) {
-    DeltaRel* ret = palloc(maxTok * sizeof(DeltaRel));                              // TODO: dynamic size
+    DeltaRel* ret = palloc0(maxTok * sizeof(DeltaRel));
     int index = start;
     int elemSize = 0;
     *count = 0;
@@ -268,8 +268,6 @@ DeltaRel* getDeltaRels(const char* json, jsmntok_t* t, int maxTok, int* count, i
             int size = t[index - 1].size;
             for (int j = 0; j < size; j++) {
                 (ret + i)->groups = prealloc((ret + i)->groups, sizeof(DeltaRelElem) * ((ret + i)->groupCount + 1));
-//                (ret + i)->groups = palloc0(sizeof(DeltaRelElem) * ((ret + i)->groupCount + 1));          // TODO: remove
-
                 if (jsoneq(json, &t[index + 1], "name") == 0) {
                     (ret + i)->groups[(ret + i)->groupCount].name = sprintf_json(json, &t[index + 2]);
                 }
