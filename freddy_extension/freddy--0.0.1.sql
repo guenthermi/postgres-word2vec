@@ -404,7 +404,7 @@ CREATE OR REPLACE FUNCTION add_online_retrofitting_statistics(varchar(200)) RETU
 AS '$libdir/freddy', 'add_online_retrofitting_statistics'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE OR REPLACE FUNCTION run_retrofitting(varchar(200), varchar(200)) RETURNS integer
+CREATE OR REPLACE FUNCTION run_retrofitting(varchar(200), varchar(200), varchar(200)) RETURNS integer
 AS '$libdir/freddy', 'run_retrofitting'
 LANGUAGE C IMMUTABLE STRICT;
 

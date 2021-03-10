@@ -2179,8 +2179,11 @@ Datum run_retrofitting(PG_FUNCTION_ARGS) {
     char* retroTableName = palloc0(100);
     WordVec* retroVecs;
 
-    elog(INFO, "read config");
     const char* configPath = GET_STR(PG_GETARG_DATUM(0));
+    const char* deltaPath = GET_STR(PG_GETARG_DATUM(1));
+    const char* resultTableName = GET_STR(PG_GETARG_DATUM(2));
+
+    elog(INFO, "read config");
     configTokens = readJsonFile(configPath, &configJson, &configTokenCount);
     if (configTokenCount < 0) {
         PG_RETURN_INT32(2);
@@ -2193,8 +2196,7 @@ Datum run_retrofitting(PG_FUNCTION_ARGS) {
     retroConfig = getRetroConfig(configJson, configTokens, &retroConfigSize);
 
     elog(INFO, "read delta file");
-    const char* path = GET_STR(PG_GETARG_DATUM(1));
-    deltaTokens = readJsonFile(path, &deltaJson, &deltaTokenCount);
+    deltaTokens = readJsonFile(deltaPath, &deltaJson, &deltaTokenCount);
     if (deltaTokenCount < 0) {
         PG_RETURN_INT32(2);
         return 0;
@@ -2235,9 +2237,8 @@ Datum run_retrofitting(PG_FUNCTION_ARGS) {
         delta = calcDelta(retroVecs, retroVecsSize, newVecs, newVecsSize);
     }
 
-//                ereport(ERROR,
-//                        (errcode(ERRCODE_DIVISION_BY_ZERO),
-//                                errmsg("division by zero")));
+    // TODO: retroVecs haben FEHELR!!!
+    retroVecsToDB(resultTableName, retroVecs, retroVecsCount);
 
     elog(INFO, "finished");
     PG_RETURN_INT32(0);

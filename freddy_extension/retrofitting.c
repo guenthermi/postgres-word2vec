@@ -670,6 +670,53 @@ char* getJoinRelFromDB(char* table, char* foreign_table) {
     return result;
 }
 
+void retroVecsToDB(char* tableName, WordVec* retroVecs, int retroVecsCount) {
+    // TODO: check if table exists and create if necessary???
+    char* command;
+    char* cur;
+    ResultInfo rInfo;
+    int dim = retroVecs->dim;
+
+    if (SPI_connect() == SPI_OK_CONNECT) {
+        elog(INFO, "writing retro vecs to database table", tableName);
+        char* insertedRows = palloc0(floor(log10((double)retroVecsCount) + 1));
+        command = palloc0(100 + strlen(tableName) + retroVecsCount * (dim * (10 + 2) + 1000));               // TODO: if mean term length > 10000 -> memory problems ----> make dependent on term length
+        cur = command;
+        cur += sprintf(cur, "INSERT INTO %s (word, vector) VALUES ", tableName);
+        for (int i = 0; i < retroVecsCount; i++) {
+            cur += sprintf(cur, "('%s', vec_to_bytea('{", escape(retroVecs[i].word));
+            for (int j = 0; j < dim; j++) {
+                if (j < dim - 1) {
+                    cur += sprintf(cur, "%f, ", retroVecs[i].vector[j]);
+                } else {
+                    cur += sprintf(cur, "%f", retroVecs[i].vector[j]);
+                }
+            }
+            cur += sprintf(cur, "}'::float4[]))");
+
+            if (i < retroVecsCount - 1) {
+                cur += sprintf(cur, ", ");
+            } else {
+                cur += sprintf(cur, ";");
+            }
+        }
+
+        rInfo.ret = SPI_exec(command, 0);
+        rInfo.proc = SPI_processed;
+        if (rInfo.ret != SPI_OK_INSERT) {
+            elog(WARNING, "Failed to insert retrofitted vectors!");
+        } else if (rInfo.proc > 0 && SPI_tuptable != NULL) {
+            TupleDesc tupdesc = SPI_tuptable->tupdesc;
+            SPITupleTable *tuptable = SPI_tuptable;
+            HeapTuple tuple = tuptable->vals[0];
+            insertedRows = SPI_getvalue(tuple, tupdesc, 2);
+
+            elog(INFO, "%s retro vecs inserted!", insertedRows);        // TODO: alter for update
+        }
+        SPI_finish();
+    }
+}
+
 
 float* calcColMean(char* tableName, char* column, char* vecTable, const char* tokenization, int dim) {
     // TODO: not exactly right but very close
