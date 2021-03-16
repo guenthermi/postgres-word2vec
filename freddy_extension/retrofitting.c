@@ -671,7 +671,7 @@ char* getJoinRelFromDB(char* table, char* foreign_table) {
     return result;
 }
 
-void retroVecsToDB(char* tableName, WordVec* retroVecs, int retroVecsCount) {
+void retroVecsToDB(const char* tableName, WordVec* retroVecs, int retroVecsCount) {
     // TODO: check if table exists and create if necessary???
     char* command;
     char* cur;

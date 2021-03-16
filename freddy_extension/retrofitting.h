@@ -173,7 +173,7 @@ int getIntFromDB(char* query);
 
 char* getJoinRelFromDB(char* table, char* foreign_table);
 
-void retroVecsToDB(char* tableName, WordVec* retroVecs, int retroVecsCount);
+void retroVecsToDB(const char* tableName, WordVec* retroVecs, int retroVecsCount);
 
 float* calcColMean(char* tableName, char* column, char* vecTable, RadixTree* vecTree, const char* tokenization, int dim);
 
