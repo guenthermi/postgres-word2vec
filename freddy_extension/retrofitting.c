@@ -802,13 +802,12 @@ float* calcColMean(char* tableName, char* column, char* vecTable, RadixTree* vec
 }
 
 void insertColMeanToDB(char* tabCol, float* mean, const char* tokenization, int dim) {
-    // TODO: insertion somehow not working
     char* command;
     char* cur;
     ResultInfo rInfo;
 
     if (SPI_connect() == SPI_OK_CONNECT) {
-        command = palloc0(500 + dim * 15);
+        command = palloc0(500 + dim * (sizeof(float) + 2));
         cur = command;
         cur += sprintf(cur,
                        "INSERT INTO col_mean (column_id, mean, tokenization_strat) VALUES ((SELECT id FROM column_stats WHERE name = '%s'), vec_to_bytea('{",
@@ -820,7 +819,7 @@ void insertColMeanToDB(char* tabCol, float* mean, const char* tokenization, int 
                 cur += sprintf(cur, "%f", mean[i]);
             }
         }
-        sprintf(cur, "}'::float4[]), '%s')", tokenization);
+        sprintf(cur, "}'::float4[]), '%s');", tokenization);
 
         rInfo.ret = SPI_exec(command, 0);
         if (rInfo.ret != SPI_OK_INSERT) {
@@ -966,7 +965,7 @@ float* calcCentroid(ProcessedRel* relation, char* retroVecTable, int dim) {
     return sum;
 }
 
-void updateCentroidInDB(ProcessedRel* relation, float* centroid, int dim) {         // TODO: no result in DB
+void updateCentroidInDB(ProcessedRel* relation, float* centroid, int dim) {
     char* command;
     char* cur;
     ResultInfo rInfo;
