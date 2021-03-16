@@ -316,7 +316,7 @@ void clearStats() {
     char tables[5][20] = {"cardinality_stats", "column_stats", "rel_num_stats", "relation_stats", "rel_col_stats"};
 
     for (int i = 0; i < 5; i++) {
-        sprintf(command, "DELETE FROM %s", *(tables + i));
+        sprintf(command, "TRUNCATE %s CASCADE", *(tables + i));
 
         SPI_connect();
         ret = SPI_exec(command, 0);
