@@ -193,8 +193,6 @@ float* getCentroid(ProcessedRel* relation, char* retroVecTable, int dim);
 
 void* prealloc(void* ptr, size_t new_s);
 
-void getToks(char* s, const char* delim, char* tok1, char* tok2);
-
 void processDeltaElements(ProcessedDeltaEntry* result, DeltaCat* deltaCat, int elementCount, DeltaElem* elements, int* index);
 
 void addPrecessRel(ProcessedDeltaEntry* elem, DeltaRelElem* deltaRelelem, char* relation, char* term, char* target);
@@ -233,7 +231,7 @@ int isZeroVec(float* vec, int dim);
 
 void printVec(float* vec, int dim);
 
-char** getNTok(char* word, char* delim, int size);
+char** getNToks(char* word, char* delim, int size);
 
 char** getTableAndCol(char* word);
 

@@ -1052,16 +1052,6 @@ void* prealloc(void* ptr, size_t new_s) {
     return repalloc(ptr, new_s);
 }
 
-void getToks(char* s, const char* delim, char* tok1, char* tok2) {
-    char cpy[2000];                                             // TODO: set dynamic ???
-    memset(cpy, 0, 2000);
-    strcpy(cpy, s);
-
-    // TODO: set tok1, tok2 size dynamic
-    strcpy(tok1, strtok(cpy, delim));
-    strcpy(tok2, strtok(NULL, delim));
-}
-
 void processDeltaElements(ProcessedDeltaEntry* result, DeltaCat* deltaCat, int elementCount, DeltaElem* elements, int* index) {
     for (int i = 0; i < elementCount; i++) {
         result[*index].name = palloc0(strlen(deltaCat->name) + strlen(elements[i].name) + 2);
@@ -1134,21 +1124,21 @@ ProcessedDeltaEntry* processDelta(DeltaCat* deltaCat, int deltaCatCount, DeltaRe
     *count = currentCount;
 
     char* delim = "~";
-    char* col1 = palloc0(100);                  // TODO: set size dynamic on usage
-    char* col2 = palloc0(100);
-    char* tok1 = palloc0(1000);
-    char* tok2 = palloc0(1000);
-    char* key1 = palloc0(1100);
-    char* key2 = palloc0(1100);
+    char* key1;
+    char* key2;
+    char** cols = palloc0(2 * sizeof(char*));
+    char** toks = palloc0(2 * sizeof(char*));
 
     for (int i = 0; i < deltaRelCount; i++) {
-        getToks((deltaRel + i)->relation, delim, col1, col2);
+        cols = getNToks((deltaRel + i)->relation, delim, 2);
         for (int j = 0; j < (deltaRel + i)->groupCount; ++j) {
             for (int k = 0; k < (deltaRel + i)->groups[j].elementCount; k++) {
-                getToks((deltaRel + i)->groups[j].elements[k].name, delim, tok1, tok2);
+                toks = getNToks((deltaRel + i)->groups[j].elements[k].name, delim, 2);
 
-                sprintf(key1, "%s#%s", col1, tok1);
-                sprintf(key2, "%s#%s", col2, tok2);
+                key1 = palloc0(strlen(cols[0]) + strlen(toks[0]) + 2);
+                key2 = palloc0(strlen(cols[1]) + strlen(toks[1]) + 2);
+                sprintf(key1, "%s#%s", cols[0], toks[0]);
+                sprintf(key2, "%s#%s", cols[1], toks[1]);
 
                 for (int l = 0; l < currentCount; l++) {
                     if (strcmp(result[l].name, key1) == 0) {
@@ -1413,7 +1403,7 @@ void printVec(float* vec, int dim) {
     }
 }
 
-char** getNTok(char* word, char* delim, int size) {             // TODO: integrate with getTok()
+char** getNToks(char* word, char* delim, int size) {
     char* s = palloc0(strlen(word) + 1);
     strncpy(s, word, strlen(word));
     char** result = palloc0(size * sizeof(char*));
@@ -1427,24 +1417,24 @@ char** getNTok(char* word, char* delim, int size) {             // TODO: integra
     return result;
 }
 
-char** getTableAndCol(char* word) {             // TODO: remove maybe
+char** getTableAndCol(char* word) {
     char* s = palloc0(strlen(word) + 1);
     strcpy(s, word);
     char** result = palloc0(2 * sizeof(char*));
-    result = getNTok(s, ".", 2);
+    result = getNToks(s, ".", 2);
     return result;
 }
 
 char** getTableAndColFromRel(char* word) {
     char** result = palloc0(5 * sizeof(char*));
     char** tmp = palloc0(2 * sizeof(char*));
-    char** tabs = getNTok(word, "~", 2);
-    tmp = getNTok(tabs[0], ".", 2);
+    char** tabs = getNToks(word, "~", 2);
+    tmp = getNToks(tabs[0], ".", 2);
     result[0] = tmp[0];
     result[1] = tmp[1];
-    tmp = getNTok(tabs[1], ".", 2);
+    tmp = getNToks(tabs[1], ".", 2);
     result[2] = tmp[0];
-    tmp = getNTok(tmp[1], ":", 2);
+    tmp = getNToks(tmp[1], ":", 2);
     result[3] = tmp[0];
     result[4] = tmp[1];
 
@@ -1532,12 +1522,23 @@ WordVec* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processedDeltaCo
                 sprintf(query, "SELECT value FROM rel_num_stats WHERE rel = '%s'", escape(term));           // TODO: should be more efficient to go over ids or something like that
                 value = getIntFromDB(query);                // TODO: test for error e.g. -1
 
-                tmp = getNTok(term, "#", 2);
+                if (value == -1) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_DIVISION_BY_ZERO),
+                                errmsg("value not found in DB")));
+                }
+
+                tmp = getNToks(term, "#", 2);
                 sprintf(query, "SELECT cardinality FROM cardinality_stats "
                                "JOIN rel_col_stats ON cardinality_stats.col_id = rel_col_stats.id "
                                "WHERE rel_col_stats.name = '%s' AND value = '%s'",
                                escape(tmp[0]), escape(tmp[1]));
-                cardinality = getIntFromDB(query);              // TODO: test for error e.g. -1
+                cardinality = getIntFromDB(query);
+                if (cardinality == -1) {
+                    ereport(ERROR,
+                            (errcode(ERRCODE_DIVISION_BY_ZERO),
+                                    errmsg("cardinality not found in DB")));
+                }
                 gamma_inv = (float)retroConfig->gamma / (cardinality * (value + 1));
 
                 for (int l = 0; l < retroVecsSize; l++) {
@@ -1557,12 +1558,9 @@ WordVec* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processedDeltaCo
                 sumVecs(nominator, tmpVec, dim);
                 denominator += (float)retroConfig->delta * 2 / ((max_r + 1) * max_c);
             }
-
-            elog(INFO, "after for loop");
         }
-        elog(INFO, "after 2nd for loop");
         result[i].word = entry.name;
-        result[i].vector = palloc(dim * sizeof(float4));
+        result[i].vector = palloc0(dim * sizeof(float4));
         memcpy(result[i].vector, nominator, dim * sizeof(float4));
         divVec(result[i].vector, denominator, dim);
     }
