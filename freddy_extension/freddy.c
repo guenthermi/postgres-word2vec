@@ -2175,9 +2175,12 @@ Datum run_retrofitting(PG_FUNCTION_ARGS) {
     int processedDeltaCount = 0;
     ProcessedDeltaEntry* processedDelta;
 
-    int retroVecsSize = 0;
+    int retroVecsCount= 0;
     char* retroTableName = palloc0(100);
     WordVec* retroVecs;
+
+    int oVecsCount = 0;
+    char* oTableName = palloc0(100);
 
     const char* configPath = GET_STR(PG_GETARG_DATUM(0));
     const char* deltaPath = GET_STR(PG_GETARG_DATUM(1));
@@ -2211,30 +2214,42 @@ Datum run_retrofitting(PG_FUNCTION_ARGS) {
 
     processedDelta = processDelta(deltaCat, deltaCatCount, deltaRel, deltaRelCount, &processedDeltaCount);
 
+    elog(INFO, "precessed delta");
+
     getTableName(RETRO_VECS, retroTableName, 100);
-    retroVecs = getWordVecs(retroTableName, &retroVecsSize);
+    retroVecs = getWordVecs(retroTableName, &retroVecsCount);
 
     for (int i = 0; i < processedDeltaCount; ++i) {
-        for (int j = 0; j < retroVecsSize; ++j) {
+        for (int j = 0; j < retroVecsCount; ++j) {
             if (strcmp(processedDelta[i].name, retroVecs[j].word) == 0) {
-                retroVecs[i] = retroVecs[retroVecsSize - 1];
-                retroVecsSize--;
-                pfree(retroVecs[retroVecsSize - 1].word);
-                pfree(retroVecs[retroVecsSize - 1].vector);
+                retroVecs[i] = retroVecs[retroVecsCount - 1];
+                retroVecsCount--;
+                pfree(retroVecs[retroVecsCount - 1].word);
+                pfree(retroVecs[retroVecsCount - 1].vector);
             }
         }
     }
 
-    retroVecs = addMissingVecs(retroVecs, &retroVecsSize, processedDelta, processedDeltaCount, retroConfig->tokenization);
+    getTableName(ORIGINAL, oTableName, 100);
+    WordVec* oVecs = getWordVecs(oTableName, &oVecsCount);
+    elog(INFO, "read google vecs");
+    hashmap_set_allocator(palloc, pfree);
+    RadixTree* vecTree = buildRadixTree(oVecs, oVecsCount, oVecs->dim);
+    elog(INFO, "created radix tree");
+
+    retroVecs = addMissingVecs(retroVecs, &retroVecsCount, processedDelta, processedDeltaCount, vecTree, retroConfig->tokenization);
     elog(INFO, "FINISHED ADDING");
 
     int newVecsSize = 0;
     float delta = 0;
     for (int i = 0; i < retroConfig->iterations; i++) {
-        WordVec* newVecs = calcRetroVecs(processedDelta, processedDeltaCount, retroVecs, retroVecsSize, retroConfig, &newVecsSize);
-        delta = calcDelta(retroVecs, retroVecsSize, newVecs, newVecsSize);
-        updateRetroVecs(retroVecs, retroVecsSize, newVecs, newVecsSize);
-        delta = calcDelta(retroVecs, retroVecsSize, newVecs, newVecsSize);
+        elog(INFO, "RUN %d", i);
+        WordVec* newVecs = calcRetroVecs(processedDelta, processedDeltaCount, retroVecs, retroVecsCount, retroConfig, vecTree, &newVecsSize);
+        delta = calcDelta(retroVecs, retroVecsCount, newVecs, newVecsSize);
+        elog(INFO, "delta: %f", delta);
+        updateRetroVecs(retroVecs, retroVecsCount, newVecs, newVecsSize);
+        delta = calcDelta(retroVecs, retroVecsCount, newVecs, newVecsSize);
+        elog(INFO, "delta: %f", delta);
     }
 
     // TODO: retroVecs haben FEHELR!!!

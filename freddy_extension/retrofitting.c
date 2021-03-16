@@ -10,6 +10,7 @@
 #include "string.h"
 #include "utils/builtins.h"
 #include "utils/palloc.h"
+#include "hashmap.h"
 
 #define JSMN_HEADER
 #include "jsmn.h"
@@ -717,8 +718,7 @@ void retroVecsToDB(char* tableName, WordVec* retroVecs, int retroVecsCount) {
     }
 }
 
-
-float* calcColMean(char* tableName, char* column, char* vecTable, const char* tokenization, int dim) {
+float* calcColMean(char* tableName, char* column, char* vecTable, RadixTree* vecTree, const char* tokenization, int dim) {
     // TODO: not exactly right but very close
     char* command;
     ResultInfo rInfo;
@@ -763,22 +763,22 @@ float* calcColMean(char* tableName, char* column, char* vecTable, const char* to
                 vectorData = DatumGetByteaP(vector);
                 tmp = (float4 *) VARDATA(vectorData);
                 if (tmpVec == NULL) {
-                    tmpVec = palloc(VARSIZE(vectorData) - VARHDRSZ);
+                    tmpVec = palloc0(VARSIZE(vectorData) - VARHDRSZ);
                 }
                 n = (VARSIZE(vectorData) - VARHDRSZ) / sizeof(float4);
                 memcpy(tmpVec, tmp, n * sizeof(float4));
             } else {
                 term = palloc0(strlen(word) + 1);
                 snprintf(term, strlen(word) + 1, "%s", word);
-                tmpVec = inferVec(term, vecTable, "_", tokenization, dim);
+                tmpVec = inferVec(term, vecTree, "_", tokenization, dim);
                 pfree(term);
             }
 
             if (!isZeroVec(tmpVec, dim)) {
                 isEqual = 0;
 
-                for (int i = 0; i < pastTermCount; ++i) {
-                    if (strcmp(pastTerms[i], word) == 0) {
+                for (int j = 0; j < pastTermCount; ++j) {           // TODO: needed?
+                    if (strcmp(pastTerms[j], word) == 0) {
                         isEqual = 1;
                         break;
                     }
@@ -867,7 +867,7 @@ float* getColMeanFromDB(char* tabCol, const char* tokenization, int dim) {
     return result;
 }
 
-float* getColMean(char* column, char* vecTable, const char* tokenization, int dim) {
+float* getColMean(char* column, char* vecTable, RadixTree* vecTree, const char* tokenization, int dim) {
     char** dbTokens = NULL;
     float* mean = NULL;
 
@@ -878,7 +878,7 @@ float* getColMean(char* column, char* vecTable, const char* tokenization, int di
     mean = getColMeanFromDB(tabCol, tokenization, dim);
 
     if (mean == NULL) {
-        mean = calcColMean(dbTokens[0], dbTokens[1], vecTable, tokenization, dim);
+        mean = calcColMean(dbTokens[0], dbTokens[1], vecTable, vecTree, tokenization, dim);
         insertColMeanToDB(tabCol, mean, tokenization, dim);
     }
     pfree(tabCol);
@@ -1166,7 +1166,7 @@ ProcessedDeltaEntry* processDelta(DeltaCat* deltaCat, int deltaCatCount, DeltaRe
     return result;
 }
 
-void* addMissingVecs(WordVec* retroVecs, int* retroVecsSize, ProcessedDeltaEntry* processedDelta, int processedDeltaCount, const char* tokenizationStrategy) {
+void* addMissingVecs(WordVec* retroVecs, int* retroVecsSize, ProcessedDeltaEntry* processedDelta, int processedDeltaCount, RadixTree* vecTree, const char* tokenizationStrategy) {
     int* vecsToAdd = palloc0(sizeof(int) * processedDeltaCount);
     int toAdd = 0;
 
@@ -1190,7 +1190,7 @@ void* addMissingVecs(WordVec* retroVecs, int* retroVecsSize, ProcessedDeltaEntry
         retroVecs = prealloc(retroVecs, sizeof(WordVec) * (*retroVecsSize + toAdd));
         for (int i = 0; i < toAdd; i++) {
             retroVecs[*retroVecsSize + i].word = processedDelta[vecsToAdd[i]].name;
-            retroVecs[*retroVecsSize + i].vector = inferVec(processedDelta[vecsToAdd[i]].name, originalTableName, "_", tokenizationStrategy, retroVecs->dim);
+            retroVecs[*retroVecsSize + i].vector = inferVec(processedDelta[vecsToAdd[i]].name, vecTree, "_", tokenizationStrategy, retroVecs->dim);
             retroVecs[*retroVecsSize + i].id = -1;
             retroVecs[*retroVecsSize + i].dim = retroVecs->dim;
         }
@@ -1201,110 +1201,146 @@ void* addMissingVecs(WordVec* retroVecs, int* retroVecsSize, ProcessedDeltaEntry
     return retroVecs;
 }
 
-float* inferVec(char* name, char* tableName, char* delimiter, const char* tokenizationStrategy, int dim) {
+int radixCompare(const void *a, const void *b, void *udata) {
+    const struct RadixTree *ta = a;
+    const struct RadixTree *tb = b;
+    return strcmp(ta->value, tb->value);
+}
+
+uint64_t radixHash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const struct RadixTree *tree = item;
+    return hashmap_murmur(tree->value, strlen(tree->value), seed0, seed1);
+}
+
+RadixTree* buildRadixTree(WordVec* vecs, int vecCount, int dim) {
+    char* delimiter = "_";
+    char* t;
+    char* split;
+    void* error = (void*)1;
+
+    RadixTree* result = palloc(sizeof(RadixTree));
+    result->value = NULL;
+    result->vector = NULL;
+    result->children = NULL;
+
+    RadixTree* current;
+    RadixTree* old;
+    RadixTree* foundTree;
+
+    for (int i = 0; i < vecCount; i++) {
+        t = palloc0(strlen(vecs[i].word) + 1);
+        snprintf(t, strlen(vecs[i].word) + 1, "%s", vecs[i].word);
+        current = result;
+
+        for (char* s = strtok(t, delimiter); s != NULL; s = strtok(NULL, delimiter)) {
+            split = palloc0(strlen(s) + 1);
+            snprintf(split, strlen(s) + 1, "%s", s);
+            foundTree = NULL;
+            if (current->children != NULL) {
+                foundTree = hashmap_get(current->children, &(RadixTree){.value=split});
+            }
+
+            if (foundTree != NULL) {
+                old = current;
+                current = foundTree;
+            } else {
+                if (current->children == NULL) {
+                    current->children = hashmap_new(sizeof(RadixTree), 0, 0, 0, radixHash, radixCompare, NULL);
+                }
+
+                RadixTree* new = palloc(sizeof(RadixTree));
+                new->value = split;
+                new->vector = NULL;
+                new->children = NULL;
+
+                error = hashmap_set(current->children, new);
+                if (error && hashmap_oom(current->children)) {
+                    ereport(ERROR,
+                            (errcode(ERRCODE_DIVISION_BY_ZERO),
+                                    errmsg("hash map out of memory")));
+                }
+
+                new = hashmap_get(current->children, &(RadixTree){.value=split});
+                if (!new) {
+                    ereport(ERROR,
+                            (errcode(ERRCODE_DIVISION_BY_ZERO),
+                                    errmsg("radix tree entry not found")));
+                }
+                old = current;
+                current = new;
+            }
+        }
+        current->vector = vecs[i].vector;
+        pfree(t);
+    }
+    return result;
+}
+
+float* inferVec(char* term, RadixTree* tree, char* delimiter, const char* tokenizationStrategy, int dim) {
     char* tmp;
-    char* term;
     int index = 0;
-    char* wordVecTableDelimiter = "_";
 
-    char* query;
-    char* single;
-    WordVec* wordVec;
-    WordVec* lastMatchedVec = palloc(sizeof(WordVec));
-    WordVec* lastMatchedSingleVec = NULL;
-    lastMatchedVec->vector = palloc0(dim * sizeof(float));
-    float* vec = palloc0(dim * sizeof(float4));
-    float count = 0;
-    int len;
+    RadixTree* foundTree = NULL;
+    RadixTree* current = tree;
 
-    char** usedTokens = NULL;
-    int usedTokensLength = 0;
+    float* result = palloc0(dim * sizeof(float));
+    float* tmpVec = palloc0(dim * sizeof(float));
+    int tokens = 0;
+    float log;
 
-    tmp = strchr(name, '#');
+    tmp = strchr(term, '#');
     if (tmp != NULL) {
-        index = (int)(tmp - name);
+        index = (int)(tmp - term);
         index = index ? index + 1 : 0;
     }
-    term = palloc0(strlen(name) + index + 1);
-    strcpy(term, name + index);
-    query = palloc0(strlen(term) + 1);
-    single = palloc0(strlen(term) + 1);
+    char* t = palloc0(strlen(term) + index + 1);
+    strcpy(t, term + index);
 
-    for (char* p = strtok(term, delimiter); p != NULL; p = strtok(NULL, delimiter)) {
-        strcpy(single, p);
-        if (strlen(single) == 0) continue;
-        len = strlen(query);
-        if (len == 0) {
-            strcpy(query, single);
-        } else {
-            strcpy(query + len, wordVecTableDelimiter);
-            strcpy(query + len + 1, single);
+    for (char* split = strtok(t, delimiter); split != NULL;) {
+        foundTree = NULL;
+        if (current->children) {
+            foundTree = hashmap_get(current->children, &(RadixTree){.value=split});
         }
-
-        wordVec = getWordVec(tableName, query);
-
-        if (wordVec != NULL) {
-            lastMatchedVec = wordVec;
+        if (foundTree) {
+            current = foundTree;
+            split = strtok(NULL, delimiter);
         } else {
-            wordVec = getWordVec(tableName, single);
-
-            memset(query, '\0', strlen(query));
-            strcpy(query, single);
-
-            if (wordVec == NULL) {
-                continue;
-            }
-
-            lastMatchedSingleVec = wordVec;
-
-            if (lastMatchedVec != NULL && !isZeroVec(lastMatchedVec->vector, dim)) {
-                if (strcmp(tokenizationStrategy, "log10") == 0) {
-                    float log = (float)log10((double)lastMatchedVec->id);
-                    multVecF(lastMatchedVec->vector, log, dim);
-                    sumVecs(vec, lastMatchedVec->vector, dim);
-                    count += log;
-                } else {
-
-                    usedTokens = prealloc(usedTokens, (usedTokensLength + 1) * sizeof(char*));
-                    usedTokens[usedTokensLength] = palloc0(strlen(lastMatchedVec->word) + 1);
-                    snprintf(usedTokens[usedTokensLength], strlen(lastMatchedVec->word) + 1, "%s", lastMatchedVec->word);
-                    usedTokensLength++;
-
-
-                    sumVecs(vec, lastMatchedVec->vector, dim);
-                    count++;
+            if (current != tree) {
+                if (current->vector) {
+                    if (strcmp(tokenizationStrategy, "log10") == 0) {
+                        log = (float)log10((double)current->id);
+                        memcpy(tmpVec, current->vector, dim * sizeof(float));
+                        multVecF(tmpVec, log, dim);
+                        sumVecs(result, tmpVec, dim);
+                        tokens += log;
+                    } else {
+                        sumVecs(result, current->vector, dim);
+                        tokens++;
+                    }
                 }
+            } else {
+                split = strtok(NULL, delimiter);
             }
-            memcpy(lastMatchedVec, lastMatchedSingleVec, sizeof(WordVec));
-            pfree(lastMatchedSingleVec);
-            lastMatchedSingleVec = NULL;
+            current = tree;
         }
     }
-    if (strlen(query) && lastMatchedVec != NULL && !isZeroVec(lastMatchedVec->vector, dim)) {
+
+    if (current && current != tree) {
         if (strcmp(tokenizationStrategy, "log10") == 0) {
-            float log = (float)log10((double)lastMatchedVec->id);
-            multVecF(lastMatchedVec->vector, log, dim);
-            sumVecs(vec, lastMatchedVec->vector, dim);
-            count += log;
+            log = (float)log10((double)current->id);
+            memcpy(tmpVec, current->vector, dim * sizeof(float));
+            multVecF(tmpVec, log, dim);
+            sumVecs(result, tmpVec, dim);
+            tokens += log;
         } else {
-            usedTokens = prealloc(usedTokens, (usedTokensLength + 1) * sizeof(char*));
-            usedTokens[usedTokensLength] = palloc0(strlen(lastMatchedVec->word) + 1);
-            snprintf(usedTokens[usedTokensLength], strlen(lastMatchedVec->word) + 1, "%s", lastMatchedVec->word);
-            usedTokensLength++;
-
-
-            sumVecs(vec, lastMatchedVec->vector, dim);
-            count++;
+            sumVecs(result, current->vector, dim);
+            tokens++;
         }
     }
-    if (count != 0) {
-        divVecF(vec, count, dim);
-    } else {
-        for (int i = 0; i < dim; i++) {
-            vec[i] = 0;
-        }
-    }
-    return vec;
+    divVec(result, tokens, dim);
+    pfree(tmpVec);
+    pfree(t);
+    return result;
 }
 
 void sumVecs(float* vec1, float* vec2, int dim) {
@@ -1416,7 +1452,7 @@ char** getTableAndColFromRel(char* word) {
     return result;
 }
 
-WordVec* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processedDeltaCount, WordVec* retroVecs, int retroVecsSize, RetroConfig* retroConfig, int* newVecsSize) {
+WordVec* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processedDeltaCount, WordVec* retroVecs, int retroVecsSize, RetroConfig* retroConfig, RadixTree* vecTree, int* newVecsSize) {
     ProcessedDeltaEntry entry;
     ProcessedRel relation;
     int dim = retroVecs[0].dim;
@@ -1456,10 +1492,10 @@ WordVec* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processedDeltaCo
     for (int i = 0; i < processedDeltaCount; i++) {
         entry = processedDelta[i];
         // TODO: ColMean is still a bit of. E.g. for apps.name usage of 189 elements and not 180
-        col_mean = getColMean(entry.column, originalTableName, retroConfig->tokenization, dim);
+        col_mean = getColMean(entry.column, originalTableName, vecTree, retroConfig->tokenization, dim);
         localeBeta = (float)retroConfig->beta / (entry.relationCount + 1);
 
-        currentVec = inferVec(entry.name, originalTableName, "_", retroConfig->tokenization, dim);
+        currentVec = inferVec(entry.name, vecTree, "_", retroConfig->tokenization, dim);
         memcpy(nominator, currentVec, dim * sizeof(float4));
         multVec(nominator, retroConfig->alpha, dim);
 
