@@ -207,6 +207,8 @@ uint64_t radixHash(const void *item, uint64_t seed0, uint64_t seed1);
 
 RadixTree* buildRadixTree(WordVec* vecs, int vecCount, int dim);
 
+void inferAdd(float* result, RadixTree* tree, int* tokens, const char* tokenizationStrategy, int dim);
+
 float* inferVec(char* term, RadixTree* tree, char* delimiter, const char* tokenizationStrategy, int dim);
 
 void sumVecs(float* f1, float* f2, int dim);

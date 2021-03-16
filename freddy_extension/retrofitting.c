@@ -1208,6 +1208,7 @@ RadixTree* buildRadixTree(WordVec* vecs, int vecCount, int dim) {
     void* error = (void*)1;
 
     RadixTree* result = palloc(sizeof(RadixTree));
+    result->id = 0;
     result->value = NULL;
     result->vector = NULL;
     result->children = NULL;
@@ -1238,6 +1239,7 @@ RadixTree* buildRadixTree(WordVec* vecs, int vecCount, int dim) {
                 }
 
                 RadixTree* new = palloc(sizeof(RadixTree));
+                new->id = vecs[i].id;
                 new->value = split;
                 new->vector = NULL;
                 new->children = NULL;
@@ -1265,17 +1267,34 @@ RadixTree* buildRadixTree(WordVec* vecs, int vecCount, int dim) {
     return result;
 }
 
+void inferAdd(float* result, RadixTree* tree, int* tokens, const char* tokenizationStrategy, int dim) {
+    float log;
+    float* tmpVec = palloc0(dim * sizeof(float));
+
+
+    if (strcmp(tokenizationStrategy, "log10") == 0) {
+        log = (float)log10((double)tree->id);
+        memcpy(tmpVec, tree->vector, dim * sizeof(float));
+        multVecF(tmpVec, log, dim);
+        sumVecs(result, tmpVec, dim);
+        *tokens += log;
+    } else {
+        sumVecs(result, tree->vector, dim);
+        *tokens += 1;
+    }
+    pfree(tmpVec);
+}
+
 float* inferVec(char* term, RadixTree* tree, char* delimiter, const char* tokenizationStrategy, int dim) {
     char* tmp;
     int index = 0;
 
     RadixTree* foundTree = NULL;
+    RadixTree* lastMatch = NULL;
     RadixTree* current = tree;
 
     float* result = palloc0(dim * sizeof(float));
-    float* tmpVec = palloc0(dim * sizeof(float));
     int tokens = 0;
-    float log;
 
     tmp = strchr(term, '#');
     if (tmp != NULL) {
@@ -1283,52 +1302,47 @@ float* inferVec(char* term, RadixTree* tree, char* delimiter, const char* tokeni
         index = index ? index + 1 : 0;
     }
     char* t = palloc0(strlen(term) + index + 1);
+    char* ot = t;
     strcpy(t, term + index);
 
-    for (char* split = strtok(t, delimiter); split != NULL;) {
+    int strSize = strlen(t);
+    char* rest = palloc0(strSize + 1);
+
+    for (char* split = strtok_r(t, delimiter, &t); split != NULL;) {
         foundTree = NULL;
         if (current->children) {
             foundTree = hashmap_get(current->children, &(RadixTree){.value=split});
         }
         if (foundTree) {
             current = foundTree;
-            split = strtok(NULL, delimiter);
-        } else {
-            if (current != tree) {
-                if (current->vector) {
-                    if (strcmp(tokenizationStrategy, "log10") == 0) {
-                        log = (float)log10((double)current->id);
-                        memcpy(tmpVec, current->vector, dim * sizeof(float));
-                        multVecF(tmpVec, log, dim);
-                        sumVecs(result, tmpVec, dim);
-                        tokens += log;
-                    } else {
-                        sumVecs(result, current->vector, dim);
-                        tokens++;
-                    }
+            if (current->vector) {
+                lastMatch = current;
+                if (t) {
+                    snprintf(rest, strlen(t) + 1, "%s", t);
                 }
-            } else {
-                split = strtok(NULL, delimiter);
             }
+        } else {
             current = tree;
+        }
+        split = strtok_r(t, delimiter, &t);
+
+        if (split == NULL && strlen(rest)) {
+            inferAdd(result, lastMatch, &tokens, tokenizationStrategy, dim);
+            current = tree;
+            memset(ot, '\0', strSize);
+            t = ot;
+            snprintf(t, strlen(rest) + 1, "%s", rest);
+            memset(rest, '\0', strSize);
+            split = strtok_r(t, delimiter, &t);
         }
     }
 
-    if (current && current != tree) {
-        if (strcmp(tokenizationStrategy, "log10") == 0) {
-            log = (float)log10((double)current->id);
-            memcpy(tmpVec, current->vector, dim * sizeof(float));
-            multVecF(tmpVec, log, dim);
-            sumVecs(result, tmpVec, dim);
-            tokens += log;
-        } else {
-            sumVecs(result, current->vector, dim);
-            tokens++;
-        }
+    if (lastMatch && lastMatch != tree) {
+        inferAdd(result, lastMatch, &tokens, tokenizationStrategy, dim);
     }
+
     divVec(result, tokens, dim);
-    pfree(tmpVec);
-    pfree(t);
+    pfree(ot);
     return result;
 }
 
