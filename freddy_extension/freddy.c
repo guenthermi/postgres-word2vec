@@ -2175,12 +2175,13 @@ Datum run_retrofitting(PG_FUNCTION_ARGS) {
     int processedDeltaCount = 0;
     ProcessedDeltaEntry* processedDelta;
 
-    int retroVecsCount= 0;
     char* retroTableName = palloc0(100);
-    WordVec* retroVecs;
+    struct hashmap* retroVecs;
 
-    int oVecsCount = 0;
     char* oTableName = palloc0(100);
+    struct hashmap* oVecs;
+
+    int dim = 0;
 
     const char* configPath = GET_STR(PG_GETARG_DATUM(0));
     const char* deltaPath = GET_STR(PG_GETARG_DATUM(1));
@@ -2214,46 +2215,46 @@ Datum run_retrofitting(PG_FUNCTION_ARGS) {
 
     processedDelta = processDelta(deltaCat, deltaCatCount, deltaRel, deltaRelCount, &processedDeltaCount);
 
-    elog(INFO, "precessed delta");
+    elog(INFO, "processed delta");
 
     getTableName(RETRO_VECS, retroTableName, 100);
-    retroVecs = getWordVecs(retroTableName, &retroVecsCount);
+    retroVecs = getWordVecs(retroTableName, &dim);
 
+    WordVec* res = NULL;
     for (int i = 0; i < processedDeltaCount; ++i) {
-        for (int j = 0; j < retroVecsCount; ++j) {
-            if (strcmp(processedDelta[i].name, retroVecs[j].word) == 0) {
-                retroVecs[i] = retroVecs[retroVecsCount - 1];
-                retroVecsCount--;
-                pfree(retroVecs[retroVecsCount - 1].word);
-                pfree(retroVecs[retroVecsCount - 1].vector);
-            }
-        }
+        res = hashmap_delete(retroVecs, &(WordVec){.word=processedDelta[i].name});
     }
 
-    getTableName(ORIGINAL, oTableName, 100);
-    WordVec* oVecs = getWordVecs(oTableName, &oVecsCount);
-    elog(INFO, "read google vecs");
     hashmap_set_allocator(palloc, pfree);
-    RadixTree* vecTree = buildRadixTree(oVecs, oVecsCount, oVecs->dim);
+
+    getTableName(ORIGINAL, oTableName, 100);
+    elog(INFO, "retrieving");
+    oVecs = getWordVecs(oTableName, NULL);
+    elog(INFO, "read original vecs");
+    RadixTree* vecTree = buildRadixTree(oVecs, dim);
     elog(INFO, "created radix tree");
 
-    retroVecs = addMissingVecs(retroVecs, &retroVecsCount, processedDelta, processedDeltaCount, vecTree, retroConfig->tokenization);
+    addMissingVecs(retroVecs, processedDelta, processedDeltaCount, vecTree, retroConfig->tokenization, dim);
     elog(INFO, "FINISHED ADDING");
 
     int newVecsSize = 0;
     float delta = 0;
     for (int i = 0; i < retroConfig->iterations; i++) {
         elog(INFO, "RUN %d", i);
-        WordVec* newVecs = calcRetroVecs(processedDelta, processedDeltaCount, retroVecs, retroVecsCount, retroConfig, vecTree, &newVecsSize);
-        delta = calcDelta(retroVecs, retroVecsCount, newVecs, newVecsSize);
+        struct hashmap* newVecs = calcRetroVecs(processedDelta, processedDeltaCount, retroVecs, retroConfig, vecTree, dim);
+        delta = calcDelta(retroVecs, newVecs, dim);
         elog(INFO, "delta: %f", delta);
-        updateRetroVecs(retroVecs, retroVecsCount, newVecs, newVecsSize);
-        delta = calcDelta(retroVecs, retroVecsCount, newVecs, newVecsSize);
+        updateRetroVecs(retroVecs, newVecs);
+        delta = calcDelta(retroVecs, newVecs, dim);
+        hashmap_free(newVecs);      // TODO: free words in hashmap
         elog(INFO, "delta: %f", delta);
     }
 
     // TODO: retroVecs haben FEHELR!!!
-    retroVecsToDB(resultTableName, retroVecs, retroVecsCount);
+    retroVecsToDB(resultTableName, retroVecs, dim);         // TODO: takes too long
+
+    hashmap_free(retroVecs);
+    hashmap_free(oVecs);
 
     elog(INFO, "finished");
     PG_RETURN_INT32(0);

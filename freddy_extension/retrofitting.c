@@ -4,6 +4,7 @@
 
 #include "postgres.h"
 #include "executor/spi.h"
+#include <float.h>
 #include "index_utils.h"
 #include "math.h"
 #include "stdlib.h"
@@ -295,14 +296,13 @@ char* escape(char* str) {
         if (str[i] == '\'') {
             char* substr1 = palloc0(len + 1);
             memcpy(substr1, str, i);
-            substr1[i + 1] = '\0';
 
             char* substr2 = palloc0(len - i);
             memcpy(substr2, &str[i + 1], len - i - 1);
             substr2[len - i - 1] = '\0';
 
-            strcat(substr1, "''");
-            strcat(substr1, escape(substr2));
+            sprintf(substr1, "%s''%s", substr1, escape(substr2));
+//            pfree(str);           // TODO: free (pfree / SPI_pfree)
             str = substr1;
             break;
         }
@@ -520,23 +520,38 @@ RetroConfig* getRetroConfig(const char* json, jsmntok_t* t, int* size) {
     return ret;
 }
 
-WordVec* getWordVecs(char* tableName, int* size) {
+int wordVecCompare(const void *a, const void *b, void *udata) {
+    const struct WordVec *wva = a;
+    const struct WordVec *wvb = b;
+    return strcmp(wva->word, wvb->word);
+}
+
+uint64_t wordVecHash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const struct WordVec *wv = item;
+    return hashmap_murmur(wv->word, strlen(wv->word), seed0, seed1);
+}
+
+struct hashmap* getWordVecs(char* tableName, int* dim) {
     char* command;
     ResultInfo rInfo;
     float4* tmp;
-    WordVec* result = NULL;
+    struct hashmap* result = NULL;
+    WordVec* wv;
+    int tmpDim = 0;
+    void* error = (void*)1;
 
     if (SPI_connect() == SPI_OK_CONNECT) {
-        command = palloc0(100);
+        command = palloc0(100 + strlen(tableName));
         sprintf(command, "SELECT * FROM %s", tableName);
         rInfo.ret = SPI_execute(command, true, 0);
         rInfo.proc = SPI_processed;
-        *size = rInfo.proc;
-        result = SPI_palloc(rInfo.proc * sizeof(WordVec));
 
         if (rInfo.ret == SPI_OK_SELECT && SPI_tuptable != NULL) {
             TupleDesc tupdesc = SPI_tuptable->tupdesc;
             SPITupleTable *tuptable = SPI_tuptable;
+
+            hashmap_set_allocator(SPI_palloc, SPI_pfree);
+            result = hashmap_new(sizeof(WordVec), rInfo.proc, 0, 0, wordVecHash, wordVecCompare, NULL);
 
             for (int i = 0; i < rInfo.proc; i++) {
                 Datum id;
@@ -546,6 +561,7 @@ WordVec* getWordVecs(char* tableName, int* size) {
                 int n = 0;
 
                 bytea *vectorData;
+                wv = SPI_palloc(sizeof(WordVec));
 
                 HeapTuple tuple = tuptable->vals[i];
                 id = SPI_getbinval(tuple, tupdesc, 1, &rInfo.info);
@@ -553,20 +569,35 @@ WordVec* getWordVecs(char* tableName, int* size) {
                 vector = SPI_getbinval(tuple, tupdesc, 3, &rInfo.info);
                 vectorData = DatumGetByteaP(vector);
 
-                result[i].id = DatumGetInt32(id);
-                result[i].word = SPI_palloc(strlen(word) + 1);
-                snprintf(result[i].word, strlen(word) + 1, "%s", word);
-                result[i].word[strlen(word)] = '\0';
+                wv->id = DatumGetInt32(id);
+                wv->word = SPI_palloc(strlen(word) + 1);
+                snprintf(wv->word, strlen(word) + 1, "%s", word);
+                wv->word[strlen(word)] = '\0';
                 tmp = (float4 *) VARDATA(vectorData);
-                result[i].vector = SPI_palloc(VARSIZE(vectorData) - VARHDRSZ);
+                wv->vector = SPI_palloc(VARSIZE(vectorData) - VARHDRSZ);
                 n = (VARSIZE(vectorData) - VARHDRSZ) / sizeof(float4);
-                memcpy(result[i].vector, tmp, n * sizeof(float4));
-                result[i].dim = n;
+                memcpy(wv->vector, tmp, n * sizeof(float4));
+                wv->dim = n;
+
+                if (tmpDim == 0) {
+                    tmpDim = n;
+                }
+
+                error = hashmap_set(result, wv);
+                if (!error && hashmap_oom(result)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_DIVISION_BY_ZERO),
+                            errmsg("hash map out of memory")));
+                }
             }
         }
         SPI_finish();
     } else {
         elog(WARNING, "WordVecs request failed!");
+    }
+    hashmap_set_allocator(palloc, pfree);
+    if (dim) {
+        *dim = tmpDim;
     }
     return result;
 }
@@ -671,38 +702,43 @@ char* getJoinRelFromDB(char* table, char* foreign_table) {
     return result;
 }
 
-void retroVecsToDB(const char* tableName, WordVec* retroVecs, int retroVecsCount) {
+bool buildRetroQuery(const void *item, void *q) {
+    const struct WordVec *wv = item;
+    retroQuery *query = q;
+    char* term = escape(wv->word);
+    size_t oLenght = strlen(query->command);
+
+    query->command = repalloc(query->command, oLenght + 50 + strlen(term) + wv->dim * (2 + FLT_MANT_DIG));    // TODO: float digits max???
+    query->cur = query->command + oLenght;
+
+    query->cur += sprintf(query->cur, "('%s', vec_to_bytea('{", term);
+    for (int i = 0; i < wv->dim; i++) {
+        if (i < wv->dim - 1) {
+            query->cur += sprintf(query->cur, "%f, ", wv->vector[i]);
+        } else {
+            query->cur += sprintf(query->cur, "%f", wv->vector[i]);
+        }
+    }
+    query->cur += sprintf(query->cur, "}'::float4[])), ");
+    return true;
+}
+
+void retroVecsToDB(const char* tableName, struct hashmap* retroVecs, int dim) {
     // TODO: check if table exists and create if necessary???
-    char* command;
-    char* cur;
     ResultInfo rInfo;
-    int dim = retroVecs->dim;
+    retroQuery* query = palloc(sizeof(retroQuery));
+    char* insertedRows;
 
     if (SPI_connect() == SPI_OK_CONNECT) {
-        elog(INFO, "writing retro vecs to database table", tableName);
-        char* insertedRows = palloc0(floor(log10((double)retroVecsCount) + 1));
-        command = palloc0(100 + strlen(tableName) + retroVecsCount * (dim * (10 + 2) + 1000));               // TODO: if mean term length > 10000 -> memory problems ----> make dependent on term length
-        cur = command;
-        cur += sprintf(cur, "INSERT INTO %s (word, vector) VALUES ", tableName);
-        for (int i = 0; i < retroVecsCount; i++) {
-            cur += sprintf(cur, "('%s', vec_to_bytea('{", escape(retroVecs[i].word));
-            for (int j = 0; j < dim; j++) {
-                if (j < dim - 1) {
-                    cur += sprintf(cur, "%f, ", retroVecs[i].vector[j]);
-                } else {
-                    cur += sprintf(cur, "%f", retroVecs[i].vector[j]);
-                }
-            }
-            cur += sprintf(cur, "}'::float4[]))");
+        elog(INFO, "writing retro vecs to database table %s", tableName);
+        query->command = palloc0(100 + strlen(tableName));               // TODO: if mean term length > 10000 -> memory problems ----> make dependent on term length
+        query->cur = query->command;
+        query->cur += sprintf(query->cur, "INSERT INTO %s (word, vector) VALUES ", tableName);
+        hashmap_scan(retroVecs, buildRetroQuery, query);
+        query->command[strlen(query->command) - 2] = ';';
+        query->command[strlen(query->command) - 1] = 0;
 
-            if (i < retroVecsCount - 1) {
-                cur += sprintf(cur, ", ");
-            } else {
-                cur += sprintf(cur, ";");
-            }
-        }
-
-        rInfo.ret = SPI_exec(command, 0);
+        rInfo.ret = SPI_exec(query->command, 0);
         rInfo.proc = SPI_processed;
         if (rInfo.ret != SPI_OK_INSERT) {
             elog(WARNING, "Failed to insert retrofitted vectors!");
@@ -734,14 +770,14 @@ float* calcColMean(char* tableName, char* column, char* vecTable, RadixTree* vec
 
     int isEqual = 0;
 
-    char** pastTerms = palloc0(1000 * sizeof(char*));
+    char** pastTerms = palloc0(1000 * sizeof(char*));       // TODO: remove magic number
     int pastTermCount = 0;
 
     SPI_connect();
     command = palloc0(500);
     sprintf(command, "SELECT regexp_replace(%s, '[\\.#~\\s\\xa0,\\(\\)/\\[\\]:]+', '_', 'g'), we.vector FROM %s "
                      "LEFT OUTER JOIN %s AS we ON regexp_replace(%s, '[\\.#~\\s\\xa0,\\(\\)/\\[\\]:]+', '_', 'g') = we.word",
-                     tabCol, tableName, vecTable, tabCol);
+                     tabCol, tableName, vecTable, tabCol);      // TODO: maybe remove JOIN and do everything with vecTree
     rInfo.ret = SPI_exec(command, 0);
     rInfo.proc = SPI_processed;
 
@@ -762,9 +798,7 @@ float* calcColMean(char* tableName, char* column, char* vecTable, RadixTree* vec
             if (rInfo.info == 0) {              // no NULL value at vector
                 vectorData = DatumGetByteaP(vector);
                 tmp = (float4 *) VARDATA(vectorData);
-                if (tmpVec == NULL) {
-                    tmpVec = palloc0(VARSIZE(vectorData) - VARHDRSZ);
-                }
+                tmpVec = palloc0(VARSIZE(vectorData) - VARHDRSZ);           // TODO: improve performance: dont allocate every run!
                 n = (VARSIZE(vectorData) - VARHDRSZ) / sizeof(float4);
                 memcpy(tmpVec, tmp, n * sizeof(float4));
             } else {
@@ -793,6 +827,7 @@ float* calcColMean(char* tableName, char* column, char* vecTable, RadixTree* vec
             pastTerms[pastTermCount] = palloc0(strlen(word) + 1);
             snprintf(pastTerms[pastTermCount], strlen(word) + 1, "%s", word);
             pastTermCount++;
+            pfree(tmpVec);
         }
     }
     SPI_finish();
@@ -1155,39 +1190,23 @@ ProcessedDeltaEntry* processDelta(DeltaCat* deltaCat, int deltaCatCount, DeltaRe
     return result;
 }
 
-void* addMissingVecs(WordVec* retroVecs, int* retroVecsSize, ProcessedDeltaEntry* processedDelta, int processedDeltaCount, RadixTree* vecTree, const char* tokenizationStrategy) {
-    int* vecsToAdd = palloc0(sizeof(int) * processedDeltaCount);
-    int toAdd = 0;
-
+void addMissingVecs(struct hashmap* retroVecs, ProcessedDeltaEntry* processedDelta, int processedDeltaCount, RadixTree* vecTree, const char* tokenizationStrategy, int dim) {
+    void* error = (void*)1;
     for (int i = 0; i < processedDeltaCount; i++) {
-        int contained = 0;
-        for (int j = 0; j < *retroVecsSize; j++) {
-            if (strcmp(processedDelta[i].name, retroVecs[j].word) == 0) {
-                contained = 1;
-                break;
+        if (!hashmap_get(retroVecs, &(WordVec){.word=processedDelta[i].name})) {
+            WordVec* wv = palloc(sizeof(WordVec));
+            wv->id = -1;
+            wv->word = processedDelta[i].name;
+            wv->vector = inferVec(processedDelta[i].name, vecTree, "_", tokenizationStrategy, dim);
+            wv->dim = dim;
+            error = hashmap_set(retroVecs, wv);
+            if (!error && hashmap_oom(retroVecs)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_DIVISION_BY_ZERO),         // TODO: set correct error code (everywhere)
+                        errmsg("hash map out of memory")));
             }
         }
-        if (!contained) {
-            vecsToAdd[toAdd] = i;
-            toAdd++;
-        }
     }
-
-    if (toAdd > 0) {
-        char* originalTableName = palloc0(100);
-        getTableName(ORIGINAL, originalTableName, 100);
-        retroVecs = prealloc(retroVecs, sizeof(WordVec) * (*retroVecsSize + toAdd));
-        for (int i = 0; i < toAdd; i++) {
-            retroVecs[*retroVecsSize + i].word = processedDelta[vecsToAdd[i]].name;
-            retroVecs[*retroVecsSize + i].vector = inferVec(processedDelta[vecsToAdd[i]].name, vecTree, "_", tokenizationStrategy, retroVecs->dim);
-            retroVecs[*retroVecsSize + i].id = -1;
-            retroVecs[*retroVecsSize + i].dim = retroVecs->dim;
-        }
-        *retroVecsSize += toAdd;
-        pfree(originalTableName);
-    }
-    pfree(vecsToAdd);
-    return retroVecs;
 }
 
 int radixCompare(const void *a, const void *b, void *udata) {
@@ -1201,69 +1220,74 @@ uint64_t radixHash(const void *item, uint64_t seed0, uint64_t seed1) {
     return hashmap_murmur(tree->value, strlen(tree->value), seed0, seed1);
 }
 
-RadixTree* buildRadixTree(WordVec* vecs, int vecCount, int dim) {
+bool addEntryToRadixTree(const void* item, void* ref) {
+    const WordVec* vec = item;
+    RadixTree* tree = ref;
     char* delimiter = "_";
     char* t;
     char* split;
     void* error = (void*)1;
 
+    RadixTree* current;
+    RadixTree* old;
+    RadixTree* foundTree;
+
+    t = palloc0(strlen(vec->word) + 1);
+    snprintf(t, strlen(vec->word) + 1, "%s", vec->word);
+    current = tree;
+
+    for (char* s = strtok(t, delimiter); s != NULL; s = strtok(NULL, delimiter)) {
+        split = palloc0(strlen(s) + 1);
+        snprintf(split, strlen(s) + 1, "%s", s);
+        foundTree = NULL;
+        if (current->children != NULL) {
+            foundTree = hashmap_get(current->children, &(RadixTree){.value=split});
+        }
+
+        if (foundTree != NULL) {
+            old = current;
+            current = foundTree;
+        } else {
+            if (current->children == NULL) {
+                current->children = hashmap_new(sizeof(RadixTree), 0, 0, 0, radixHash, radixCompare, NULL);
+            }
+
+            RadixTree* new = palloc(sizeof(RadixTree));
+            new->id = vec->id;
+            new->value = split;
+            new->vector = NULL;
+            new->children = NULL;
+
+            error = hashmap_set(current->children, new);
+            if (!error && hashmap_oom(current->children)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_DIVISION_BY_ZERO),
+                        errmsg("hash map out of memory")));
+            }
+
+            new = hashmap_get(current->children, &(RadixTree){.value=split});
+            if (!new) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_DIVISION_BY_ZERO),
+                        errmsg("radix tree entry not found")));
+            }
+            old = current;
+            current = new;
+        }
+    }
+    current->vector = vec->vector;
+    pfree(t);
+    return true;
+}
+
+RadixTree* buildRadixTree(struct hashmap* vecs, int dim) {
     RadixTree* result = palloc(sizeof(RadixTree));
     result->id = 0;
     result->value = NULL;
     result->vector = NULL;
     result->children = NULL;
 
-    RadixTree* current;
-    RadixTree* old;
-    RadixTree* foundTree;
-
-    for (int i = 0; i < vecCount; i++) {
-        t = palloc0(strlen(vecs[i].word) + 1);
-        snprintf(t, strlen(vecs[i].word) + 1, "%s", vecs[i].word);
-        current = result;
-
-        for (char* s = strtok(t, delimiter); s != NULL; s = strtok(NULL, delimiter)) {
-            split = palloc0(strlen(s) + 1);
-            snprintf(split, strlen(s) + 1, "%s", s);
-            foundTree = NULL;
-            if (current->children != NULL) {
-                foundTree = hashmap_get(current->children, &(RadixTree){.value=split});
-            }
-
-            if (foundTree != NULL) {
-                old = current;
-                current = foundTree;
-            } else {
-                if (current->children == NULL) {
-                    current->children = hashmap_new(sizeof(RadixTree), 0, 0, 0, radixHash, radixCompare, NULL);
-                }
-
-                RadixTree* new = palloc(sizeof(RadixTree));
-                new->id = vecs[i].id;
-                new->value = split;
-                new->vector = NULL;
-                new->children = NULL;
-
-                error = hashmap_set(current->children, new);
-                if (error && hashmap_oom(current->children)) {
-                    ereport(ERROR,
-                            (errcode(ERRCODE_DIVISION_BY_ZERO),
-                                    errmsg("hash map out of memory")));
-                }
-
-                new = hashmap_get(current->children, &(RadixTree){.value=split});
-                if (!new) {
-                    ereport(ERROR,
-                            (errcode(ERRCODE_DIVISION_BY_ZERO),
-                                    errmsg("radix tree entry not found")));
-                }
-                old = current;
-                current = new;
-            }
-        }
-        current->vector = vecs[i].vector;
-        pfree(t);
-    }
+    hashmap_scan(vecs, addEntryToRadixTree, result);
     return result;
 }
 
@@ -1428,6 +1452,7 @@ char** getNToks(char* word, char* delim, int size) {
         strncpy(result[i], p, strlen(p));
         i++;
     }
+    pfree(s);
     return result;
 }
 
@@ -1455,10 +1480,9 @@ char** getTableAndColFromRel(char* word) {
     return result;
 }
 
-WordVec* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processedDeltaCount, WordVec* retroVecs, int retroVecsSize, RetroConfig* retroConfig, RadixTree* vecTree, int* newVecsSize) {
+struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processedDeltaCount, struct hashmap* retroVecs, RetroConfig* retroConfig, RadixTree* vecTree, int dim) {
     ProcessedDeltaEntry entry;
     ProcessedRel relation;
-    int dim = retroVecs[0].dim;
     char* query = palloc0(100);
 
     float* col_mean;
@@ -1481,7 +1505,8 @@ WordVec* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processedDeltaCo
 
     float* currentVec = palloc0(dim * sizeof(float4));
 
-    WordVec* result = palloc(processedDeltaCount * sizeof(WordVec));
+    WordVec* wv;
+    struct hashmap* result = hashmap_new(sizeof(WordVec), processedDeltaCount, 0, 0, wordVecHash, wordVecCompare, NULL);
 
     char* originalTableName = palloc0(100);
     char* retroVecTable = palloc0(100);
@@ -1489,10 +1514,11 @@ WordVec* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processedDeltaCo
     getTableName(ORIGINAL, originalTableName, 100);
     getTableName(RETRO_VECS, retroVecTable, 100);
 
-    char** tmp = palloc0(2 * sizeof(void*));
+    char** tmp;
 
 
     for (int i = 0; i < processedDeltaCount; i++) {
+        wv = palloc(sizeof(WordVec));
         entry = processedDelta[i];
         // TODO: ColMean is still a bit of. E.g. for apps.name usage of 189 elements and not 180
         col_mean = getColMean(entry.column, originalTableName, vecTree, retroConfig->tokenization, dim);
@@ -1500,9 +1526,11 @@ WordVec* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processedDeltaCo
 
         currentVec = inferVec(entry.name, vecTree, "_", retroConfig->tokenization, dim);
         memcpy(nominator, currentVec, dim * sizeof(float4));
+        pfree(currentVec);
         multVec(nominator, retroConfig->alpha, dim);
 
         sumVecs(nominator, col_mean, dim);
+        pfree(col_mean);
         add2Vec(nominator, localeBeta, dim);
         denominator = retroConfig->alpha + localeBeta;
 
@@ -1533,33 +1561,36 @@ WordVec* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processedDeltaCo
 
             for (int k = 0; k < relation.termCount; k++) {
                 term = relation.terms[k];
-                sprintf(query, "SELECT value FROM rel_num_stats WHERE rel = '%s'", escape(term));           // TODO: should be more efficient to go over ids or something like that
-                value = getIntFromDB(query);                // TODO: test for error e.g. -1
+                sprintf(query, "SELECT value FROM rel_num_stats WHERE rel = '%s'", escape(term));
+                // TODO: should be more efficient to go over ids or something like that   ---> not possible now, because ids are auto increment on insertion. Ids would need to be inserted
+                value = getIntFromDB(query);
 
                 if (value == -1) {
                     ereport(ERROR,
                         (errcode(ERRCODE_DIVISION_BY_ZERO),
-                                errmsg("value not found in DB")));
+                            errmsg("value not found in DB")));
                 }
 
                 tmp = getNToks(term, "#", 2);
                 sprintf(query, "SELECT cardinality FROM cardinality_stats "
                                "JOIN rel_col_stats ON cardinality_stats.col_id = rel_col_stats.id "
                                "WHERE rel_col_stats.name = '%s' AND value = '%s'",
-                               escape(tmp[0]), escape(tmp[1]));
+                        escape(tmp[0]), escape(tmp[1]));
+                pfree(tmp[0]);
+                pfree(tmp[1]);
+                pfree(tmp);
                 cardinality = getIntFromDB(query);
                 if (cardinality == -1) {
                     ereport(ERROR,
-                            (errcode(ERRCODE_DIVISION_BY_ZERO),
-                                    errmsg("cardinality not found in DB")));
+                        (errcode(ERRCODE_DIVISION_BY_ZERO),
+                            errmsg("cardinality not found in DB")));
                 }
-                gamma_inv = (float)retroConfig->gamma / (cardinality * (value + 1));
 
-                for (int l = 0; l < retroVecsSize; l++) {
-                    if (strcmp(term, retroVecs[l].word) == 0) {
-                        memcpy(retroVec, retroVecs[l].vector, dim * sizeof(float4));
-                        break;
-                    }
+                gamma_inv = (float) retroConfig->gamma / (cardinality * (value + 1));
+
+                WordVec *wv = hashmap_get(retroVecs, &(WordVec) {.word=term});
+                if (wv) {
+                    memcpy(retroVec, wv->vector, dim * sizeof(float));
                 }
 
                 memcpy(tmpVec, retroVec, dim * sizeof(float4));
@@ -1573,38 +1604,67 @@ WordVec* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processedDeltaCo
                 denominator += (float)retroConfig->delta * 2 / ((max_r + 1) * max_c);
             }
         }
-        result[i].word = entry.name;
-        result[i].vector = palloc0(dim * sizeof(float4));
-        memcpy(result[i].vector, nominator, dim * sizeof(float4));
-        divVec(result[i].vector, denominator, dim);
+        wv->word = palloc0(strlen(entry.name));
+        wv->word = entry.name;
+        wv->vector = palloc0(dim * sizeof(float4));
+        memcpy(wv->vector, nominator, dim * sizeof(float4));
+        divVec(wv->vector, denominator, dim);
+        hashmap_set(result, wv);
     }
+
+    pfree(nominator);
+    pfree(centroid);
+    pfree(delta);
+    pfree(retroVec);
+    pfree(tmpVec);
+    pfree(query);
+    pfree(originalTableName);
+    pfree(retroVecTable);
+    
     return result;
 }
 
-void updateRetroVecs(WordVec* retroVecs, int retroVecsSize, WordVec* newVecs, int newVecsSize) {
-    // TODO: newVecs has values not in retroVecs???? -> Add
-    for (int j = 0; j < newVecsSize; j++) {
-        for (int k = 0; k < retroVecsSize; ++k) {
-            if (strcmp(newVecs[j].word, retroVecs[k].word) == 0) {          // TODO: compairing ids should be faster -> check if consistent
-                retroVecs[k].vector = newVecs[j].vector;
-                break;
-            }
-        }
+bool iterUpdate(const void* item, void* data) {
+    const WordVec* wv1 = item;
+    WordVec* retroVec;
+    l2IterStr* str = data;
+
+    if ((retroVec = hashmap_get(str->vecs, &(WordVec){.word=wv1->word}))) {
+//        pfree(retroVec->vector);              // TODO: should free memory
+        retroVec->vector = wv1->vector;
+        hashmap_set(str->vecs, retroVec);       // TODO: necessaru?
     }
+    return true;
 }
 
-float calcDelta(WordVec* retroVecs, int retroVecsSize, WordVec* newVecs, int newVecsSize) {
-    float delta = 0;
-    int dim = retroVecs[0].dim;
-    for (int j = 0; j < newVecsSize; j++) {
-        for (int k = 0; k < retroVecsSize; ++k) {
-            if (strcmp(newVecs[j].word, retroVecs[k].word) == 0) {          // TODO: compairing ids should be faster -> check if consistent
-                delta += calcL2Norm(retroVecs[k].vector, newVecs[j].vector, dim);
-                break;
-            }
-        }
+void updateRetroVecs(struct hashmap* retroVecs, struct hashmap* newVecs) {
+    // TODO: newVecs has values not in retroVecs???? -> Add
+    l2IterStr* str = palloc(sizeof(l2IterStr));
+    str->vecs = retroVecs;
+    hashmap_scan(newVecs, iterUpdate, str);
+}
+
+bool iterL2(const void* item, void* data) {
+    const WordVec* wv1 = item;
+    WordVec* wv2;
+    l2IterStr* str = data;
+
+    if ((wv2 = (WordVec*)hashmap_get(str->vecs, &(WordVec){.word=wv1->word}))) {
+        str->delta += calcL2Norm(wv1->vector, wv2->vector, str->dim);
     }
-    return delta;
+    return true;
+}
+
+double calcDelta(struct hashmap* retroVecs, struct hashmap* newVecs, int dim) {
+    l2IterStr* str = palloc(sizeof(l2IterStr));
+    str->vecs = retroVecs;
+    str->dim = dim;
+    str->delta = 0;
+    hashmap_scan(newVecs, iterL2, str);
+
+    double ret = str->delta;
+    pfree(str);
+    return ret;
 }
 
 float calcL2Norm(float* vec1, float* vec2, int dim) {

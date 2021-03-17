@@ -127,6 +127,17 @@ typedef struct RadixTree {
     struct hashmap* children;
 } RadixTree;
 
+typedef struct retroQuery {
+    char* command;
+    char* cur;
+} retroQuery;
+
+typedef struct l2IterStr {
+    struct hashmap* vecs;
+    int dim;
+    double delta;
+} l2IterStr;
+
 int jsoneq(const char *json, jsmntok_t *tok, const char *s);
 
 jsmntok_t* readJsonFile(const char* path, char** json, int* r);
@@ -165,7 +176,11 @@ void insertRelNumDataStatistics(RelNumData* relNumData, int relCount);
 
 RetroConfig* getRetroConfig(const char* json, jsmntok_t* t, int* count);
 
-WordVec* getWordVecs(char* tableName, int* size);
+int wordVecCompare(const void *a, const void *b, void *udata);
+
+uint64_t wordVecHash(const void *item, uint64_t seed0, uint64_t seed1);
+
+struct hashmap* getWordVecs(char* tableName, int* dim);
 
 WordVec* getWordVec(char* tableName, char* word);
 
@@ -173,7 +188,9 @@ int getIntFromDB(char* query);
 
 char* getJoinRelFromDB(char* table, char* foreign_table);
 
-void retroVecsToDB(const char* tableName, WordVec* retroVecs, int retroVecsCount);
+bool buildRetroQuery(const void *item, void *q);
+
+void retroVecsToDB(const char* tableName, struct hashmap* retroVecs, int dim);
 
 float* calcColMean(char* tableName, char* column, char* vecTable, RadixTree* vecTree, const char* tokenization, int dim);
 
@@ -199,13 +216,15 @@ void addPrecessRel(ProcessedDeltaEntry* elem, DeltaRelElem* deltaRelelem, char* 
 
 ProcessedDeltaEntry* processDelta(DeltaCat* deltaCat, int deltaCatCount, DeltaRel* deltaRel, int deltaRelCount, int* count);
 
-void* addMissingVecs(WordVec* retroVecs, int* retroVecsSize, ProcessedDeltaEntry* processedDelta, int processedDeltaCount, RadixTree* vecTree, const char* tokenizationStrategy);
+void addMissingVecs(struct hashmap* retroVecs, ProcessedDeltaEntry* processedDelta, int processedDeltaCount, RadixTree* vecTree, const char* tokenizationStrategy, int dim);
 
 int radixCompare(const void *a, const void *b, void *udata);
 
 uint64_t radixHash(const void *item, uint64_t seed0, uint64_t seed1);
 
-RadixTree* buildRadixTree(WordVec* vecs, int vecCount, int dim);
+bool addEntryToRadixTree(const void* item, void* ref);
+
+RadixTree* buildRadixTree(struct hashmap* vecs, int dim);
 
 void inferAdd(float* result, RadixTree* tree, int* tokens, const char* tokenizationStrategy, int dim);
 
@@ -239,11 +258,15 @@ char** getTableAndCol(char* word);
 
 char** getTableAndColFromRel(char* word);
 
-WordVec* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processedDeltaCount, WordVec* retroVecs, int retroVecsSize, RetroConfig* retroConfig, RadixTree* vecTree, int* newVecsSize);
+struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processedDeltaCount, struct hashmap* retroVecs, RetroConfig* retroConfig, RadixTree* vecTree, int dim);
 
-void updateRetroVecs(WordVec* retroVecs, int retroVecsSize, WordVec* newVecs, int newVecsSize);
+bool iterUpdate(const void* item, void* data);
 
-float calcDelta(WordVec* retroVecs, int retroVecsSize, WordVec* newVecs, int newVecsSize);
+void updateRetroVecs(struct hashmap* retroVecs, struct hashmap* newVecs);
+
+bool iterL2(const void* item, void* data);
+
+double calcDelta(struct hashmap* retroVecs, struct hashmap* newVecs, int dim);
 
 float calcL2Norm(float* vec1, float* vec2, int dim);
 
