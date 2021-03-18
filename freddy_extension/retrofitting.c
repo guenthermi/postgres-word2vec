@@ -1347,7 +1347,7 @@ float* inferVec(char* term, RadixTree* tree, char* delimiter, const char* tokeni
     int strSize = strlen(t);
     char* rest = palloc0(strSize + 1);
 
-    for (char* split = strtok_r(t, delimiter, &t); split != NULL;) {
+    for (char* split = strtok_r(t, delimiter, &t); split != NULL; split = strtok_r(t, delimiter, &t)) {
         foundTree = NULL;
         if (current->children) {
             foundTree = hashmap_get(current->children, &(RadixTree){.value=split});
@@ -1361,18 +1361,15 @@ float* inferVec(char* term, RadixTree* tree, char* delimiter, const char* tokeni
                 }
             }
         } else {
+            if (lastMatch) {
+                inferAdd(result, lastMatch, &tokens, tokenizationStrategy, dim);
+                memset(ot, '\0', strSize);
+                t = ot;
+                snprintf(t, strlen(rest) + 1, "%s", rest);
+                memset(rest, '\0', strSize);
+                lastMatch = NULL;
+            }
             current = tree;
-        }
-        split = strtok_r(t, delimiter, &t);
-
-        if (split == NULL && strlen(rest)) {
-            inferAdd(result, lastMatch, &tokens, tokenizationStrategy, dim);
-            current = tree;
-            memset(ot, '\0', strSize);
-            t = ot;
-            snprintf(t, strlen(rest) + 1, "%s", rest);
-            memset(rest, '\0', strSize);
-            split = strtok_r(t, delimiter, &t);
         }
     }
 
