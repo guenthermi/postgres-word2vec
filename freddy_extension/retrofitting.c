@@ -1655,14 +1655,28 @@ struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processed
 }
 
 bool iterUpdate(const void* item, void* data) {
-    const WordVec* wv1 = item;
+    const WordVec* wv = item;
     WordVec* retroVec;
     l2IterStr* str = data;
     void* el = (void*)1;
 
-    if ((retroVec = hashmap_get(str->vecs, &(WordVec){.word=wv1->word}))) {
+    if ((retroVec = hashmap_get(str->vecs, &(WordVec){.word=wv->word}))) {
         pfree(retroVec->vector);
-        retroVec->vector = wv1->vector;
+        retroVec->vector = wv->vector;
+        el = hashmap_set(str->vecs, retroVec);
+        if (!el && hashmap_oom(str->vecs)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_DIVISION_BY_ZERO),
+                    errmsg("hash map out of memory")));
+        }
+    } else {
+        retroVec = palloc(sizeof(WordVec));
+        retroVec->id = wv->id;
+        retroVec->dim = wv->dim;
+        retroVec->word = palloc0(strlen(wv->word) + 1);
+        sprintf(retroVec->word, "%s", wv->word);
+        retroVec->vector = palloc0(wv->dim * sizeof(float));
+        memcpy(retroVec->vector, wv->vector, wv->dim * sizeof(float));
         el = hashmap_set(str->vecs, retroVec);
         if (!el && hashmap_oom(str->vecs)) {
             ereport(ERROR,
