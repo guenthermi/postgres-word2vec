@@ -188,6 +188,8 @@ int getIntFromDB(char* query);
 
 char* getJoinRelFromDB(char* table, char* foreign_table);
 
+bool getRetroQuerySize(const void* item, void* s);
+
 bool buildRetroQuery(const void *item, void *q);
 
 void retroVecsToDB(const char* tableName, struct hashmap* retroVecs, int dim);

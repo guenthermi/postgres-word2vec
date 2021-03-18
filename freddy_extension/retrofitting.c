@@ -702,14 +702,17 @@ char* getJoinRelFromDB(char* table, char* foreign_table) {
     return result;
 }
 
-bool buildRetroQuery(const void *item, void *q) {
+bool getRetroQuerySize(const void* item, void* s) {
+    const struct WordVec *wv = item;
+    int* sum = s;
+    *sum += wv->dim * (2 + FLT_MANT_DIG) + strlen(wv->word) + 50;
+    return true;
+}
+
+bool buildRetroQuery(const void* item, void* q) {
     const struct WordVec *wv = item;
     retroQuery *query = q;
     char* term = escape(wv->word);
-    size_t oLenght = strlen(query->command);
-
-    query->command = repalloc(query->command, oLenght + 50 + strlen(term) + wv->dim * (2 + FLT_MANT_DIG));    // TODO: float digits max???
-    query->cur = query->command + oLenght;
 
     query->cur += sprintf(query->cur, "('%s', vec_to_bytea('{", term);
     for (int i = 0; i < wv->dim; i++) {
@@ -730,8 +733,11 @@ void retroVecsToDB(const char* tableName, struct hashmap* retroVecs, int dim) {
     char* insertedRows;
 
     if (SPI_connect() == SPI_OK_CONNECT) {
+        int queryLength = 100;
+        hashmap_scan(retroVecs, getRetroQuerySize, &queryLength);
+
         elog(INFO, "writing retro vecs to database table %s", tableName);
-        query->command = palloc0(100 + strlen(tableName));               // TODO: if mean term length > 10000 -> memory problems ----> make dependent on term length
+        query->command = palloc0(queryLength);
         query->cur = query->command;
         query->cur += sprintf(query->cur, "INSERT INTO %s (word, vector) VALUES ", tableName);
         hashmap_scan(retroVecs, buildRetroQuery, query);

@@ -2250,8 +2250,7 @@ Datum run_retrofitting(PG_FUNCTION_ARGS) {
         elog(INFO, "delta: %f", delta);
     }
 
-    // TODO: retroVecs haben FEHELR!!!
-    retroVecsToDB(resultTableName, retroVecs, dim);         // TODO: takes too long
+    retroVecsToDB(resultTableName, retroVecs, dim);
 
     hashmap_free(retroVecs);
     hashmap_free(oVecs);
