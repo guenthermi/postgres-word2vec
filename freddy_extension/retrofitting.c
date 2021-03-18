@@ -726,7 +726,17 @@ bool buildRetroQuery(const void* item, void* q) {
     return true;
 }
 
-void retroVecsToDB(const char* tableName, struct hashmap* retroVecs, int dim) {
+void deleteRetroVecsDB(const char* tableName) {
+    ResultInfo rInfo;
+    char* command = palloc0(100 + strlen(tableName));
+    sprintf(command, "TRUNCATE TABLE %s RESTART IDENTITY", tableName);
+    if (SPI_connect() == SPI_OK_CONNECT) {
+        rInfo.ret = SPI_exec(command, 0);
+        SPI_finish();
+    }
+}
+
+void retroVecsToDB(const char* tableName, struct hashmap* retroVecs, int dim) {     // TODO: do batchwise??
     // TODO: check if table exists and create if necessary???
     ResultInfo rInfo;
     retroQuery* query = palloc(sizeof(retroQuery));

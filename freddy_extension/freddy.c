@@ -2249,6 +2249,7 @@ Datum run_retrofitting(PG_FUNCTION_ARGS) {
         elog(INFO, "delta: %f", delta);
     }
 
+    deleteRetroVecsDB(resultTableName);
     retroVecsToDB(resultTableName, retroVecs, dim);
 
     hashmap_free(retroVecs);

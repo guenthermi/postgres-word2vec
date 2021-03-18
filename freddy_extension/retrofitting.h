@@ -192,6 +192,8 @@ bool getRetroQuerySize(const void* item, void* s);
 
 bool buildRetroQuery(const void *item, void *q);
 
+void deleteRetroVecsDB(const char* tableName);
+
 void retroVecsToDB(const char* tableName, struct hashmap* retroVecs, int dim);
 
 float* calcColMean(char* tableName, char* column, char* vecTable, RadixTree* vecTree, const char* tokenization, int dim);
