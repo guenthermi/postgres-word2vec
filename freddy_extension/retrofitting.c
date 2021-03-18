@@ -538,7 +538,7 @@ struct hashmap* getWordVecs(char* tableName, int* dim) {
     struct hashmap* result = NULL;
     WordVec* wv;
     int tmpDim = 0;
-    void* error = (void*)1;
+    void* el = (void*)1;
 
     if (SPI_connect() == SPI_OK_CONNECT) {
         command = palloc0(100 + strlen(tableName));
@@ -583,8 +583,8 @@ struct hashmap* getWordVecs(char* tableName, int* dim) {
                     tmpDim = n;
                 }
 
-                error = hashmap_set(result, wv);
-                if (!error && hashmap_oom(result)) {
+                el = hashmap_set(result, wv);
+                if (!el && hashmap_oom(result)) {
                     ereport(ERROR,
                         (errcode(ERRCODE_DIVISION_BY_ZERO),
                             errmsg("hash map out of memory")));
@@ -1196,7 +1196,7 @@ ProcessedDeltaEntry* processDelta(DeltaCat* deltaCat, int deltaCatCount, DeltaRe
 }
 
 void addMissingVecs(struct hashmap* retroVecs, ProcessedDeltaEntry* processedDelta, int processedDeltaCount, RadixTree* vecTree, const char* tokenizationStrategy, int dim) {
-    void* error = (void*)1;
+    void* el = (void*)1;
     for (int i = 0; i < processedDeltaCount; i++) {
         if (!hashmap_get(retroVecs, &(WordVec){.word=processedDelta[i].name})) {
             WordVec* wv = palloc(sizeof(WordVec));
@@ -1204,8 +1204,8 @@ void addMissingVecs(struct hashmap* retroVecs, ProcessedDeltaEntry* processedDel
             wv->word = processedDelta[i].name;
             wv->vector = inferVec(processedDelta[i].name, vecTree, "_", tokenizationStrategy, dim);
             wv->dim = dim;
-            error = hashmap_set(retroVecs, wv);
-            if (!error && hashmap_oom(retroVecs)) {
+            el = hashmap_set(retroVecs, wv);
+            if (!el && hashmap_oom(retroVecs)) {
                 ereport(ERROR,
                     (errcode(ERRCODE_DIVISION_BY_ZERO),         // TODO: set correct error code (everywhere)
                         errmsg("hash map out of memory")));
@@ -1231,7 +1231,7 @@ bool addEntryToRadixTree(const void* item, void* ref) {
     char* delimiter = "_";
     char* t;
     char* split;
-    void* error = (void*)1;
+    void* el = (void*)1;
 
     RadixTree* current;
     RadixTree* old;
@@ -1263,8 +1263,8 @@ bool addEntryToRadixTree(const void* item, void* ref) {
             new->vector = NULL;
             new->children = NULL;
 
-            error = hashmap_set(current->children, new);
-            if (!error && hashmap_oom(current->children)) {
+            el = hashmap_set(current->children, new);
+            if (!el && hashmap_oom(current->children)) {
                 ereport(ERROR,
                     (errcode(ERRCODE_DIVISION_BY_ZERO),
                         errmsg("hash map out of memory")));
@@ -1516,7 +1516,7 @@ struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processed
     float* tmpVec = palloc0(dim * sizeof(float4));
     char* term;
     int value;
-    void* error = (void*)1;
+    void* el = (void*)1;
 
     float* currentVec = palloc0(dim * sizeof(float4));
 
@@ -1625,8 +1625,8 @@ struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processed
         wv->vector = palloc0(dim * sizeof(float4));
         memcpy(wv->vector, nominator, dim * sizeof(float4));
         divVec(wv->vector, denominator, dim);
-        error = hashmap_set(result, wv);
-        if (!error && hashmap_oom(result)) {
+        el = hashmap_set(result, wv);
+        if (!el && hashmap_oom(result)) {
             ereport(ERROR,
                (errcode(ERRCODE_DIVISION_BY_ZERO),
                     errmsg("hash map out of memory")));
@@ -1648,11 +1648,17 @@ bool iterUpdate(const void* item, void* data) {
     const WordVec* wv1 = item;
     WordVec* retroVec;
     l2IterStr* str = data;
+    void* el = (void*)1;
 
     if ((retroVec = hashmap_get(str->vecs, &(WordVec){.word=wv1->word}))) {
-//        pfree(retroVec->vector);              // TODO: should free memory
+        pfree(retroVec->vector);
         retroVec->vector = wv1->vector;
-        hashmap_set(str->vecs, retroVec);       // TODO: necessaru?
+        el = hashmap_set(str->vecs, retroVec);
+        if (!el && hashmap_oom(str->vecs)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_DIVISION_BY_ZERO),
+                    errmsg("hash map out of memory")));
+        }
     }
     return true;
 }
