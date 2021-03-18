@@ -2220,9 +2220,8 @@ Datum run_retrofitting(PG_FUNCTION_ARGS) {
     getTableName(RETRO_VECS, retroTableName, 100);
     retroVecs = getWordVecs(retroTableName, &dim);
 
-    WordVec* res = NULL;
     for (int i = 0; i < processedDeltaCount; ++i) {
-        res = hashmap_delete(retroVecs, &(WordVec){.word=processedDelta[i].name});
+        hashmap_delete(retroVecs, &(WordVec){.word=processedDelta[i].name});
     }
 
     hashmap_set_allocator(palloc, pfree);

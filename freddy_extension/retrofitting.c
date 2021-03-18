@@ -4,7 +4,7 @@
 
 #include "postgres.h"
 #include "executor/spi.h"
-#include <float.h>
+#include "float.h"
 #include "index_utils.h"
 #include "math.h"
 #include "stdlib.h"
@@ -1026,7 +1026,6 @@ void updateCentroidInDB(ProcessedRel* relation, float* centroid, int dim) {
                      "WHERE id = (SELECT %s FROM relation_stats WHERE relation_name = '%s')",
                      relation->target, relation->key);
 
-        elog(INFO, "%s", command);
         rInfo.ret = SPI_execute(command, false, 0);
         if (rInfo.ret != SPI_OK_UPDATE) {
             elog(WARNING, "Failed to update relation centroid vector!");
@@ -1486,17 +1485,26 @@ char** getTableAndColFromRel(char* word) {
     return result;
 }
 
+void resizeQuery(char* query, int* currentSize, int maxNeeded) {
+    if (*currentSize < maxNeeded) {
+        elog(INFO, "resize query to %d", maxNeeded);
+        pfree(query);
+        query = palloc0(maxNeeded);
+    }
+}
+
 struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processedDeltaCount, struct hashmap* retroVecs, RetroConfig* retroConfig, RadixTree* vecTree, int dim) {
     ProcessedDeltaEntry entry;
     ProcessedRel relation;
-    char* query = palloc0(100);
+    int querySize = 1000;
+    char* query = palloc0(querySize);
 
     float* col_mean;
     float localeBeta;
     float* nominator = palloc0(dim * sizeof(float4));
     float denominator;
 
-    float* centroid = palloc0(dim * sizeof(float4));
+    float* centroid;
     float gamma;
     float gamma_inv;
     float* delta = palloc0(dim * sizeof(float4));
@@ -1508,6 +1516,7 @@ struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processed
     float* tmpVec = palloc0(dim * sizeof(float4));
     char* term;
     int value;
+    void* error = (void*)1;
 
     float* currentVec = palloc0(dim * sizeof(float4));
 
@@ -1524,7 +1533,6 @@ struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processed
 
 
     for (int i = 0; i < processedDeltaCount; i++) {
-        wv = palloc(sizeof(WordVec));
         entry = processedDelta[i];
         // TODO: ColMean is still a bit of. E.g. for apps.name usage of 189 elements and not 180
         col_mean = getColMean(entry.column, originalTableName, vecTree, retroConfig->tokenization, dim);
@@ -1560,6 +1568,7 @@ struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processed
             pfree(centroid);
             multVecF(delta, (float)retroConfig->delta * 2 / (max_c * (max_r + 1)), dim);
             subVecs(nominator, delta, dim);
+            resizeQuery(query, &querySize, strlen(relation.target) + strlen(relation.key) + 200);
             sprintf(query, "SELECT size FROM rel_col_stats WHERE id = (SELECT %s FROM relation_stats WHERE relation_name = '%s')",
                     relation.target, relation.key);
             size = getIntFromDB(query);
@@ -1567,6 +1576,7 @@ struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processed
 
             for (int k = 0; k < relation.termCount; k++) {
                 term = relation.terms[k];
+                resizeQuery(query, &querySize, strlen(escape(term)) + 100);
                 sprintf(query, "SELECT value FROM rel_num_stats WHERE rel = '%s'", escape(term));
                 // TODO: should be more efficient to go over ids or something like that   ---> not possible now, because ids are auto increment on insertion. Ids would need to be inserted
                 value = getIntFromDB(query);
@@ -1594,9 +1604,9 @@ struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processed
 
                 gamma_inv = (float) retroConfig->gamma / (cardinality * (value + 1));
 
-                WordVec *wv = hashmap_get(retroVecs, &(WordVec) {.word=term});
-                if (wv) {
-                    memcpy(retroVec, wv->vector, dim * sizeof(float));
+                WordVec* rwv = hashmap_get(retroVecs, &(WordVec) {.word=term});
+                if (rwv) {
+                    memcpy(retroVec, rwv->vector, dim * sizeof(float4));
                 }
 
                 memcpy(tmpVec, retroVec, dim * sizeof(float4));
@@ -1610,23 +1620,27 @@ struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processed
                 denominator += (float)retroConfig->delta * 2 / ((max_r + 1) * max_c);
             }
         }
-        wv->word = palloc0(strlen(entry.name));
+        wv = palloc(sizeof(WordVec));
         wv->word = entry.name;
         wv->vector = palloc0(dim * sizeof(float4));
         memcpy(wv->vector, nominator, dim * sizeof(float4));
         divVec(wv->vector, denominator, dim);
-        hashmap_set(result, wv);
+        error = hashmap_set(result, wv);
+        if (!error && hashmap_oom(result)) {
+            ereport(ERROR,
+               (errcode(ERRCODE_DIVISION_BY_ZERO),
+                    errmsg("hash map out of memory")));
+        }
     }
 
     pfree(nominator);
-    pfree(centroid);
     pfree(delta);
     pfree(retroVec);
     pfree(tmpVec);
     pfree(query);
     pfree(originalTableName);
     pfree(retroVecTable);
-    
+
     return result;
 }
 
@@ -1662,15 +1676,9 @@ bool iterL2(const void* item, void* data) {
 }
 
 double calcDelta(struct hashmap* retroVecs, struct hashmap* newVecs, int dim) {
-    l2IterStr* str = palloc(sizeof(l2IterStr));
-    str->vecs = retroVecs;
-    str->dim = dim;
-    str->delta = 0;
-    hashmap_scan(newVecs, iterL2, str);
-
-    double ret = str->delta;
-    pfree(str);
-    return ret;
+    l2IterStr str = {.vecs=retroVecs, .dim=dim, .delta=0};
+    hashmap_scan(newVecs, iterL2, &str);
+    return str.delta;
 }
 
 float calcL2Norm(float* vec1, float* vec2, int dim) {

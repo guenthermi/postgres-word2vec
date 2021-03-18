@@ -260,6 +260,8 @@ char** getTableAndCol(char* word);
 
 char** getTableAndColFromRel(char* word);
 
+void resizeQuery(char* query, int* currentSize, int maxNeeded);
+
 struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processedDeltaCount, struct hashmap* retroVecs, RetroConfig* retroConfig, RadixTree* vecTree, int dim);
 
 bool iterUpdate(const void* item, void* data);
