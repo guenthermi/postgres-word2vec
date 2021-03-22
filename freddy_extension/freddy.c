@@ -2212,8 +2212,8 @@ Datum run_retrofitting(PG_FUNCTION_ARGS) {
     deltaCat = getDeltaCats(deltaJson, deltaTokens, deltaTokenCount, &deltaCatCount, &endCat);
     deltaRel = getDeltaRels(deltaJson, deltaTokens, deltaTokenCount, &deltaRelCount, endCat);
 
-
     processedDelta = processDelta(deltaCat, deltaCatCount, deltaRel, deltaRelCount, &processedDeltaCount);
+    // TODO: free deltaCat and deltaRel
 
     elog(INFO, "processed delta");
 
@@ -2236,7 +2236,6 @@ Datum run_retrofitting(PG_FUNCTION_ARGS) {
     addMissingVecs(retroVecs, processedDelta, processedDeltaCount, vecTree, retroConfig->tokenization, dim);
     elog(INFO, "FINISHED ADDING");
 
-    int newVecsSize = 0;
     float delta = 0;
     for (int i = 0; i < retroConfig->iterations; i++) {
         elog(INFO, "RUN %d", i);
@@ -2245,7 +2244,7 @@ Datum run_retrofitting(PG_FUNCTION_ARGS) {
         elog(INFO, "delta: %f", delta);
         updateRetroVecs(retroVecs, newVecs);
         delta = calcDelta(retroVecs, newVecs, dim);
-        hashmap_free(newVecs);      // TODO: free words in hashmap
+        hashmap_free(newVecs);          // TODO: clear content of newVecs
         elog(INFO, "delta: %f", delta);
     }
 

@@ -561,7 +561,6 @@ struct hashmap* getWordVecs(char* tableName, int* dim) {
                 int n = 0;
 
                 bytea *vectorData;
-                wv = SPI_palloc(sizeof(WordVec));
 
                 HeapTuple tuple = tuptable->vals[i];
                 id = SPI_getbinval(tuple, tupdesc, 1, &rInfo.info);
@@ -885,7 +884,6 @@ void insertColMeanToDB(char* tabCol, float* mean, const char* tokenization, int 
 }
 
 float* getColMeanFromDB(char* tabCol, const char* tokenization, int dim) {
-    // TODO: no option to recalculate mean
     char* command;
     ResultInfo rInfo;
 
@@ -1111,10 +1109,10 @@ void processDeltaElements(ProcessedDeltaEntry* result, DeltaCat* deltaCat, int e
         sprintf(result[*index].name, "%s#%s", deltaCat->name, elements[i].name);
 
         result[*index].vector = palloc0(strlen(elements[i].value) + 1);
-        result[*index].vector = elements[i].value;
+        sprintf(result[*index].vector, "%s", elements[i].value);
 
         result[*index].column = palloc0(strlen(deltaCat->name) + 1);
-        result[*index].column = deltaCat->name;
+        sprintf(result[*index].column, "%s", deltaCat->name);
 
         result[*index].relationCount = 0;
         *index += 1;
@@ -1541,10 +1539,8 @@ struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processed
 
     char** tmp;
 
-
     for (int i = 0; i < processedDeltaCount; i++) {
         entry = processedDelta[i];
-        // TODO: ColMean is still a bit of. E.g. for apps.name usage of 189 elements and not 180
         col_mean = getColMean(entry.column, originalTableName, vecTree, retroConfig->tokenization, dim);
         localeBeta = (float)retroConfig->beta / (entry.relationCount + 1);
 
@@ -1562,16 +1558,11 @@ struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processed
             relation = entry.relations[j];
             gamma = (float)retroConfig->gamma / (relation.termCount * (entry.relationCount + 1));
 
-            // TODO:
-            // TODO: 'apps.name~genres.name:apps_genres' vs 'genres.name~apps.name:apps_genres'
-            // TODO:
-
             sprintf(query, "SELECT max_r FROM relation_stats WHERE relation_name = '%s'", relation.key);
             max_r = getIntFromDB(query);
             sprintf(query, "SELECT max_c FROM relation_stats WHERE relation_name = '%s'", relation.key);
             max_c = getIntFromDB(query);
 
-            // TODO: target column seems to be wrong!!!
             centroid = getCentroid(&relation, retroVecTable, dim);
 
             memcpy(delta, centroid, dim * sizeof(float4));
