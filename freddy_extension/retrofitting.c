@@ -569,6 +569,9 @@ struct hashmap* getWordVecs(char* tableName, int* dim) {
                 vector = SPI_getbinval(tuple, tupdesc, 3, &rInfo.info);
                 vectorData = DatumGetByteaP(vector);
 
+                if (word[0] == '_' || word[strlen(word) - 1] == '_') continue;
+                wv = SPI_palloc(sizeof(WordVec));
+
                 wv->id = DatumGetInt32(id);
                 wv->word = SPI_palloc(strlen(word) + 1);
                 snprintf(wv->word, strlen(word) + 1, "%s", word);
