@@ -138,6 +138,19 @@ typedef struct l2IterStr {
     double delta;
 } l2IterStr;
 
+typedef struct dbElem {
+    char* key;
+    int value;
+} dbElem;
+
+typedef struct retroPointer {
+    struct hashmap* max_r_map;
+    struct hashmap* max_c_map;
+    struct hashmap* size_map;
+    struct hashmap* value_map;
+    struct hashmap* cardinality_map;
+} retroPointer;
+
 int jsoneq(const char *json, jsmntok_t *tok, const char *s);
 
 jsmntok_t* readJsonFile(const char* path, char** json, int* r);
@@ -264,7 +277,13 @@ char** getTableAndColFromRel(char* word);
 
 void resizeQuery(char* query, int* currentSize, int maxNeeded);
 
-struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processedDeltaCount, struct hashmap* retroVecs, RetroConfig* retroConfig, RadixTree* vecTree, int dim);
+int getInt(struct hashmap* map, char* query);
+
+int dbElemCompare(const void *a, const void *b, void *data);
+
+uint64_t dbElemHash(const void *item, uint64_t seed0, uint64_t seed1);
+
+struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processedDeltaCount, struct hashmap* retroVecs, RetroConfig* retroConfig, RadixTree* vecTree, retroPointer* pointer, int dim);
 
 bool iterUpdate(const void* item, void* data);
 

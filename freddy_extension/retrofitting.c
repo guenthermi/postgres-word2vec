@@ -1501,7 +1501,43 @@ void resizeQuery(char* query, int* currentSize, int maxNeeded) {
     }
 }
 
-struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processedDeltaCount, struct hashmap* retroVecs, RetroConfig* retroConfig, RadixTree* vecTree, int dim) {
+int getInt(struct hashmap* map, char* query) {
+    int res;
+    dbElem* found = NULL;
+    dbElem* el = NULL;
+
+    if ((found = hashmap_get(map, &(dbElem){.key=query}))) {
+        return found->value;
+    }
+
+    res = getIntFromDB(query);
+
+    el = palloc(sizeof(dbElem));
+    el->key = palloc0(strlen(query) + 1);
+    sprintf(el->key, "%s", query);
+    el->value = res;
+
+    el = hashmap_set(map, el);
+    if (!el && hashmap_oom(map)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DIVISION_BY_ZERO),
+                errmsg("hash map out of memory")));
+    }
+    return res;
+}
+
+int dbElemCompare(const void *a, const void *b, void *data) {
+    const struct dbElem *ela = a;
+    const struct dbElem *elb = b;
+    return strcmp(ela->key, elb->key);
+}
+
+uint64_t dbElemHash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const struct dbElem *elem = item;
+    return hashmap_murmur(elem->key, strlen(elem->key), seed0, seed1);
+}
+
+struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processedDeltaCount, struct hashmap* retroVecs, RetroConfig* retroConfig, RadixTree* vecTree, retroPointer* pointer, int dim) {
     ProcessedDeltaEntry entry;
     ProcessedRel relation;
     int querySize = 1000;
@@ -1559,9 +1595,9 @@ struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processed
             gamma = (float)retroConfig->gamma / (relation.termCount * (entry.relationCount + 1));
 
             sprintf(query, "SELECT max_r FROM relation_stats WHERE relation_name = '%s'", relation.key);
-            max_r = getIntFromDB(query);
+            max_r = getInt(pointer->max_r_map, query);
             sprintf(query, "SELECT max_c FROM relation_stats WHERE relation_name = '%s'", relation.key);
-            max_c = getIntFromDB(query);
+            max_c = getInt(pointer->max_c_map, query);
 
             centroid = getCentroid(&relation, retroVecTable, dim);
 
@@ -1572,15 +1608,14 @@ struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processed
             resizeQuery(query, &querySize, strlen(relation.target) + strlen(relation.key) + 200);
             sprintf(query, "SELECT size FROM rel_col_stats WHERE id = (SELECT %s FROM relation_stats WHERE relation_name = '%s')",
                     relation.target, relation.key);
-            size = getIntFromDB(query);
+            size = getInt(pointer->size_map, query);
             denominator -= (float)retroConfig->delta * 2 / (max_c * (max_r + 1)) * size;
 
             for (int k = 0; k < relation.termCount; k++) {
                 term = relation.terms[k];
                 resizeQuery(query, &querySize, strlen(escape(term)) + 100);
                 sprintf(query, "SELECT value FROM rel_num_stats WHERE rel = '%s'", escape(term));
-                // TODO: should be more efficient to go over ids or something like that   ---> not possible now, because ids are auto increment on insertion. Ids would need to be inserted
-                value = getIntFromDB(query);
+                value = getInt(pointer->value_map, query);
 
                 if (value == -1) {
                     ereport(ERROR,
@@ -1596,7 +1631,7 @@ struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processed
                 pfree(tmp[0]);
                 pfree(tmp[1]);
                 pfree(tmp);
-                cardinality = getIntFromDB(query);
+                cardinality = getInt(pointer->cardinality_map, query);
                 if (cardinality == -1) {
                     ereport(ERROR,
                         (errcode(ERRCODE_DIVISION_BY_ZERO),

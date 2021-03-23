@@ -2236,10 +2236,23 @@ Datum run_retrofitting(PG_FUNCTION_ARGS) {
     addMissingVecs(retroVecs, processedDelta, processedDeltaCount, vecTree, retroConfig->tokenization, dim);
     elog(INFO, "FINISHED ADDING");
 
+    struct hashmap* max_r_map = hashmap_new(sizeof(dbElem), 0, 0, 0, dbElemHash, dbElemCompare, NULL);
+    struct hashmap* max_c_map = hashmap_new(sizeof(dbElem), 0, 0, 0, dbElemHash, dbElemCompare, NULL);
+    struct hashmap* size_map = hashmap_new(sizeof(dbElem), 0, 0, 0, dbElemHash, dbElemCompare, NULL);
+    struct hashmap* value_map = hashmap_new(sizeof(dbElem), 0, 0, 0, dbElemHash, dbElemCompare, NULL);
+    struct hashmap* cardinality_map = hashmap_new(sizeof(dbElem), 0, 0, 0, dbElemHash, dbElemCompare, NULL);
+
+    retroPointer* pointer = palloc(sizeof(retroPointer));
+    pointer->max_r_map = max_r_map;
+    pointer->max_c_map = max_c_map;
+    pointer->size_map = size_map;
+    pointer->value_map = value_map;
+    pointer->cardinality_map = cardinality_map;
+
     float delta = 0;
     for (int i = 0; i < retroConfig->iterations; i++) {
         elog(INFO, "RUN %d", i);
-        struct hashmap* newVecs = calcRetroVecs(processedDelta, processedDeltaCount, retroVecs, retroConfig, vecTree, dim);
+        struct hashmap* newVecs = calcRetroVecs(processedDelta, processedDeltaCount, retroVecs, retroConfig, vecTree, pointer, dim);
         delta = calcDelta(retroVecs, newVecs, dim);
         elog(INFO, "delta: %f", delta);
         updateRetroVecs(retroVecs, newVecs);
