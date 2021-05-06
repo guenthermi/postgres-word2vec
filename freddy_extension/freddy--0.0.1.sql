@@ -191,7 +191,7 @@ SELECT set_knn_batch_function('k_nearest_neighbour_ivfadc_batch');
 SELECT set_analogy_function('analogy_3cosadd');
 SELECT set_analogy_in_function('analogy_3cosadd_in');
 SELECT set_groups_function('grouping_func');
-SELECT set_knn_join_function('knn_in_ivpq_batch');
+SELECT set_knn_join_function('knn_search_in_batch');
 
 CREATE OR REPLACE FUNCTION knn(query varchar(100), k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
@@ -430,6 +430,30 @@ INNER JOIN %s AS v1 ON v1.word = ''%s''
 ORDER BY cosine_similarity_bytea(v1.vector, v2.vector) DESC
 FETCH FIRST %s ROWS ONLY
 ', table_name, table_name, replace(token, '''', ''''''), k);
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION knn_search_in_batch(query_set varchar(100)[], k integer, input_set varchar[]) RETURNS TABLE (query varchar, target varchar, similarity float4) AS $$
+DECLARE
+formated varchar[];
+formated_query varchar;
+rec RECORD;
+BEGIN
+FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
+  formated[I] = replace(input_set[I], '''', '''''');
+END LOOP;
+
+FOR I IN array_lower(query_set, 1)..array_upper(query_set, 1) LOOP
+  formated_query = replace(query_set[I], '''', '''''');
+  FOR rec IN EXECUTE format('SELECT word, similarity FROM knn_in_exact(''%s''::varchar, ''%s''::integer, ''%s''::varchar[])', formated_query, k, formated) LOOP
+    query := query_set[I];
+    target := rec.word;
+    similarity := rec.similarity;
+    RETURN NEXT;
+  END LOOP;
+END LOOP;
+RETURN;
 END
 $$
 LANGUAGE plpgsql;
