@@ -131,9 +131,12 @@ number_tables int;
 BEGIN
 EXECUTE 'SELECT count(proname) FROM pg_proc WHERE proname=''get_vecs_name''' INTO init_done;
 EXECUTE 'SELECT count(*) FROM information_schema.tables WHERE table_schema=''public'' AND table_type=''BASE TABLE'' AND table_name in (''google_vecs'', ''google_vecs_norm'', ''pq_quantization'', ''pq_codebook'', ''fine_quantization'', ''coarse_quantization'', ''residual_codebook'', ''fine_quantization_ivpq'', ''codebook_ivpq'', ''coarse_quantization_ivpq'')' INTO number_tables;
-RAISE NOTICE 'i want to print % and %', init_done,number_tables;
+RAISE INFO '% out of 10 default vector and index tables are availabe.', number_tables;
 IF init_done = 0 AND number_tables = 10 THEN
   EXECUTE 'SELECT init(''google_vecs'', ''google_vecs_norm'', ''pq_quantization'', ''pq_codebook'', ''fine_quantization'', ''coarse_quantization'', ''residual_codebook'', ''fine_quantization_ivpq'', ''codebook_ivpq'', ''coarse_quantization_ivpq'')';
+ELSE
+  RAISE INFO 'Execute the init function to declear vector and index tables (use ''-'' for missing tables)';
+  EXECUTE 'SELECT init(''-'', ''-'', ''-'', ''-'', ''-'', ''-'', ''-'', ''-'', ''-'', ''-'')';
 END IF;
 END$$;
 
@@ -163,10 +166,15 @@ LANGUAGE plpgsql;
 DO $$
 DECLARE
 stat_table_present int;
+vec_table_name varchar;
+ivpq_quantization varchar;
 BEGIN
 EXECUTE 'SELECT count(*) FROM information_schema.tables WHERE table_schema=''public'' AND table_type=''BASE TABLE'' AND table_name in (''stat_google_vecs_norm_word'')' INTO stat_table_present;
-IF stat_table_present = 0 THEN
+EXECUTE 'SELECT get_vecs_name()' INTO vec_table_name;
+EXECUTE 'SELECT get_vecs_name_ivpq_quantization()' INTO ivpq_quantization;
+IF stat_table_present = 0 AND ivpq_quantization != '-' AND vec_table_name != '-' THEN
   EXECUTE 'SELECT create_statistics(''google_vecs_norm'', ''word'', ''coarse_quantization_ivpq'')';
+  EXECUTE 'SELECT set_statistics_table(''stat_google_vecs_norm_word'')';
 END IF;
 END $$;
 
@@ -184,7 +192,6 @@ SELECT set_analogy_function('analogy_3cosadd');
 SELECT set_analogy_in_function('analogy_3cosadd_in');
 SELECT set_groups_function('grouping_func');
 SELECT set_knn_join_function('knn_in_ivpq_batch');
-SELECT set_statistics_table('stat_google_vecs_norm_word');
 
 CREATE OR REPLACE FUNCTION knn(query varchar(100), k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
