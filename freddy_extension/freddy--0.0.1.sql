@@ -124,6 +124,13 @@ END
 $$
 LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION set_cluster_function(name varchar) RETURNS void AS $$
+BEGIN
+EXECUTE format('CREATE OR REPLACE FUNCTION get_cluster_function_name() RETURNS varchar AS ''SELECT varchar ''''%s'''''' LANGUAGE sql IMMUTABLE', name);
+END
+$$
+LANGUAGE plpgsql;
+
 DO $$
 DECLARE
 init_done int;
@@ -192,6 +199,7 @@ SELECT set_analogy_function('analogy_3cosadd');
 SELECT set_analogy_in_function('analogy_3cosadd_in');
 SELECT set_groups_function('grouping_func');
 SELECT set_knn_join_function('knn_search_in_batch');
+SELECT set_cluster_function('cluster_exact');
 
 CREATE OR REPLACE FUNCTION knn(query varchar(100), k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
@@ -307,6 +315,21 @@ END
 $$
 LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION cluster(tokens varchar(100)[], k integer) RETURNS  TABLE (word varchar(100), cluster integer) AS $$
+DECLARE
+function_name varchar;
+formated_tokens varchar[];
+BEGIN
+FOR I IN array_lower(tokens, 1)..array_upper(tokens, 1) LOOP
+  formated_tokens[I] = replace(tokens[I], '''', '''''');
+END LOOP;
+EXECUTE 'SELECT get_cluster_function_name()' INTO function_name;
+RETURN QUERY EXECUTE format('
+SELECT * FROM %s(''%s'', %s)
+', function_name, formated_tokens, k);
+END
+$$
+LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION cosine_similarity(float4[], float4[]) RETURNS float8
 AS '$libdir/freddy', 'cosine_similarity'
@@ -366,10 +389,6 @@ LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION ivfadc_batch_search(integer[], integer) RETURNS SETOF record
 AS '$libdir/freddy', 'ivfadc_batch_search'
-LANGUAGE C IMMUTABLE STRICT;
-
-CREATE OR REPLACE FUNCTION cluster_pq_to_id(integer[], integer) RETURNS SETOF record
-AS '$libdir/freddy', 'cluster_pq'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION grouping_pq(integer[], integer[]) RETURNS SETOF record
@@ -458,6 +477,29 @@ END
 $$
 LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION knn_search_in_batch(query_set bytea[], k integer, input_set varchar[]) RETURNS TABLE (query integer, target varchar, similarity float4) AS $$
+DECLARE
+formated varchar[];
+formated_query varchar;
+rec RECORD;
+BEGIN
+FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
+  formated[I] = replace(input_set[I], '''', '''''');
+END LOOP;
+
+FOR I IN array_lower(query_set, 1)..array_upper(query_set, 1) LOOP
+  FOR rec IN EXECUTE format('SELECT word, similarity FROM knn_in_exact(''%s''::bytea, ''%s''::integer, ''%s''::varchar[])', query_set[I], k, formated) LOOP
+    query := I;
+    target := rec.word;
+    similarity := rec.similarity;
+    RETURN NEXT;
+  END LOOP;
+END LOOP;
+RETURN;
+END
+$$
+LANGUAGE plpgsql;
+
 CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc(token varchar(100), k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;
@@ -511,7 +553,6 @@ END
 $$
 LANGUAGE plpgsql;
 
--- TODO ADAPT
 CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc_pv(token varchar(100), k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;
@@ -531,21 +572,20 @@ END
 $$
 LANGUAGE plpgsql;
 
--- TODO ADAPT
-CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc_pv(input_vector anyarray, k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
+CREATE OR REPLACE FUNCTION k_nearest_neighbour_ivfadc_pv(input_vector bytea, k integer) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
-fine_quantization_name varchar;
+table_name varchar;
 post_verif integer;
 BEGIN
-EXECUTE 'SELECT get_vecs_name_residual_quantization()' INTO fine_quantization_name;
+EXECUTE 'SELECT get_vecs_name()' INTO table_name;
 EXECUTE 'SELECT get_pvf()' INTO post_verif;
 RETURN QUERY EXECUTE format('
-SELECT fq.word, cosine_similarity_bytea(v1.vector, v2.vector)
-FROM ivfadc_search(''%s''::float4[], %s) AS (idx integer, distance float4)
-INNER JOIN %s AS fq ON idx = fq.id
-ORDER BY cosine_similarity_bytea(''%s''::float4[], fq.word) DESC
+SELECT v.word, cosine_similarity_bytea(''%s''::bytea, v.vector)
+FROM ivfadc_search(''%s''::bytea, %s) AS (idx integer, distance float4)
+INNER JOIN %s AS v ON idx = v.id
+ORDER BY cosine_similarity_bytea(''%s''::bytea, v.vector) DESC
 FETCH FIRST %s ROWS ONLY
-', input_vector, post_verif*k, fine_quantization_name, input_vector, k);
+', input_vector, input_vector, post_verif*k, table_name, input_vector, k);
 END
 $$
 LANGUAGE plpgsql;
@@ -709,7 +749,6 @@ FOR I IN array_lower(query_set, 1)..array_upper(query_set, 1) LOOP
 END LOOP;
 -- create lookup id -> query_word
 FOR rec IN EXECUTE format('SELECT word, vector, id FROM %s WHERE word = ANY(''%s'')', table_name, formated_queries) LOOP
-  words := words || rec.word;
   vectors := vectors || rec.vector;
   ids := ids || rec.id;
 END LOOP;
@@ -717,6 +756,40 @@ RETURN QUERY EXECUTE format('
 SELECT f.word, g.word, (1.0 - (distance / 2.0))::float4 as similarity
 FROM %s(''%s''::bytea[], ''%s''::integer[], ''%s''::int, ARRAY(SELECT id FROM %s WHERE word = ANY(''%s''::varchar(100)[])), %s, %s, %s, ''%s'', %s, %s) AS (qid integer, tid integer, distance float4) INNER JOIN %s AS f ON qid = f.id INNER JOIN %s AS g ON tid = g.id;
 ', function_name, vectors, ids, k, table_name, formated, alpha, post_verif, method_flag, use_targetlist, confidence, long_codes_threshold, table_name, table_name);
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION knn_in_iv_batch(query_set bytea[], k integer, input_set varchar[], function_name varchar) RETURNS TABLE (query integer, target varchar, similarity float4) AS $$
+DECLARE
+table_name varchar;
+post_verif integer;
+alpha integer;
+method_flag integer;
+use_targetlist boolean;
+confidence float4;
+long_codes_threshold integer;
+formated varchar[];
+ids integer[];
+rec RECORD;
+BEGIN
+EXECUTE 'SELECT get_vecs_name()' INTO table_name;
+EXECUTE 'SELECT get_pvf()' INTO post_verif;
+EXECUTE 'SELECT get_alpha()' INTO alpha;
+EXECUTE 'SELECT get_method_flag()' INTO method_flag;
+EXECUTE 'SELECT get_use_targetlist()' INTO use_targetlist;
+EXECUTE 'SELECT get_confidence_value()' INTO confidence;
+EXECUTE 'SELECT get_long_codes_threshold()' INTO long_codes_threshold;
+FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
+  formated[I] = replace(input_set[I], '''', '''''');
+END LOOP;
+
+EXECUTE format('SELECT array_agg(x) FROM generate_series(1,%s) x',array_upper(query_set, 1)) INTO ids;
+
+RETURN QUERY EXECUTE format('
+SELECT qid, g.word, (1.0 - (distance / 2.0))::float4 as similarity
+FROM %s(''%s''::bytea[], ''%s''::integer[], ''%s''::int, ARRAY(SELECT id FROM %s WHERE word = ANY(''%s''::varchar(100)[])), %s, %s, %s, ''%s'', %s, %s) AS (qid integer, tid integer, distance float4) INNER JOIN %s AS g ON tid = g.id;
+', function_name, query_set, ids, k, table_name, formated, alpha, post_verif, method_flag, use_targetlist, confidence, long_codes_threshold, table_name);
 END
 $$
 LANGUAGE plpgsql;
@@ -735,7 +808,21 @@ FOR I IN array_lower(query_set, 1)..array_upper(query_set, 1) LOOP
 END LOOP;
 
 RETURN QUERY EXECUTE format('
-SELECT * FROM knn_in_iv_batch(''%s'', %s, ''%s'', ''%s'')', formated_queries, k, formated, 'ivpq_search_in');
+SELECT * FROM knn_in_iv_batch(''%s''::varchar[], %s, ''%s'', ''%s'')', formated_queries, k, formated, 'ivpq_search_in');
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION knn_in_ivpq_batch(query_set bytea[], k integer, input_set varchar[]) RETURNS TABLE (query int, target varchar, similarity float4) AS $$
+DECLARE
+formated varchar[];
+BEGIN
+FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
+  formated[I] = replace(input_set[I], '''', '''''');
+END LOOP;
+
+RETURN QUERY EXECUTE format('
+SELECT * FROM knn_in_iv_batch(''%s''::bytea[], %s, ''%s'', ''%s'')', query_set, k, formated, 'ivpq_search_in');
 END
 $$
 LANGUAGE plpgsql;
@@ -752,6 +839,29 @@ SELECT pqs.word, (1.0 - (distance / 2.0))::float4
 FROM pq_search_in(''%s''::float4[], %s, ''%s''::int[]) AS (result_id integer, distance float4)
 INNER JOIN %s AS pqs ON result_id = pqs.id
 ', query_vector, k, input_set, pq_quantization_name);
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION knn_in_pq_batch(query_set bytea[], k integer, input_set varchar[]) RETURNS TABLE (query integer, target varchar, similarity float4) AS $$
+DECLARE
+table_name varchar;
+use_targetlist boolean;
+formated varchar[];
+ids integer[];
+BEGIN
+EXECUTE 'SELECT get_vecs_name()' INTO table_name;
+EXECUTE 'SELECT get_use_targetlist()' INTO use_targetlist;
+FOR I IN array_lower(input_set, 1)..array_upper(input_set, 1) LOOP
+  formated[I] = replace(input_set[I], '''', '''''');
+END LOOP;
+
+EXECUTE format('SELECT array_agg(x) FROM generate_series(1,%s) x',array_upper(query_set, 1)) INTO ids;
+
+RETURN QUERY EXECUTE format('
+SELECT qid, g.word, (1.0 - (distance / 2.0))::float4 as similarity
+FROM pq_search_in_batch(''%s''::bytea[], ''%s''::integer[], ''%s''::int, ARRAY(SELECT id FROM %s WHERE word = ANY(''%s''::varchar(100)[])), ''%s'') AS (qid integer, tid integer, distance float4) INNER JOIN %s AS g ON tid = g.id;
+', query_set, ids, k, table_name, formated, use_targetlist, table_name);
 END
 $$
 LANGUAGE plpgsql;
@@ -878,14 +988,6 @@ END
 $$
 LANGUAGE plpgsql;
 
--- TODO implement  cosine_similarity_bytea(vector float4[], token2 varchar(100), OUT result float8)
-
--- CREATE OR REPLACE FUNCTION cosine_similarity_norm(anyarray, anyarray) RETURNS float8
--- AS '$libdir/freddy', 'cosine_similarity_norm'
--- LANGUAGE C IMMUTABLE STRICT;
-
--- TODO ADAPT
--- TopK_In Exakt
 CREATE OR REPLACE FUNCTION knn_in_exact(token varchar(100), k integer, input_set integer[]) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;
@@ -902,7 +1004,29 @@ END
 $$
 LANGUAGE plpgsql;
 
--- TODO ADAPT
+CREATE OR REPLACE FUNCTION knn_in_exact(query_vector bytea, k integer, input_set bytea[]) RETURNS TABLE (id integer, vec bytea, similarity float4) AS $$
+DECLARE
+id_array integer[];
+rec RECORD;
+BEGIN
+-- create array of ids
+EXECUTE format('SELECT array_agg(generate_series) FROM generate_series(1,%s)',
+  array_upper(input_set, 1)) INTO id_array;
+FOR rec in EXECUTE format('
+  SELECT id, vec, cosine_similarity_bytea(''%s''::bytea, vec) as sim
+  FROM unnest(''%s''::int[], ''%s''::bytea[]) x(id,vec)
+  ORDER BY cosine_similarity_bytea(''%s''::bytea, vec) DESC
+  FETCH FIRST %s ROWS ONLY', query_vector, id_array, input_set, query_vector, k) LOOP
+  id := rec.id;
+  vec := rec.vec;
+  similarity := rec.sim;
+  RETURN NEXT;
+END LOOP;
+RETURN;
+END
+$$
+LANGUAGE plpgsql;
+
 CREATE OR REPLACE FUNCTION knn_in_exact(query_vector bytea, k integer, input_set integer[]) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;
@@ -918,7 +1042,6 @@ END
 $$
 LANGUAGE plpgsql;
 
--- TODO ADAPT
 CREATE OR REPLACE FUNCTION knn_in_exact(token varchar(100), k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;
@@ -940,7 +1063,6 @@ END
 $$
 LANGUAGE plpgsql;
 
--- TODO ADAPT
 CREATE OR REPLACE FUNCTION knn_in_exact(query_vector bytea, k integer, input_set varchar(100)[]) RETURNS TABLE (word varchar(100), similarity float4) AS $$
 DECLARE
 table_name varchar;
@@ -961,23 +1083,127 @@ END
 $$
 LANGUAGE plpgsql;
 
--- TODO ADAPT
-CREATE OR REPLACE FUNCTION cluster_pq(tokens varchar(100)[], k integer) RETURNS  TABLE (words varchar(100)[]) AS $$
+CREATE OR REPLACE FUNCTION generic_cluster(tokens varchar(100)[], k integer, function_name varchar) RETURNS  TABLE (word varchar(100), cluster integer) AS $$
 DECLARE
 table_name varchar;
 formated varchar[];
+token_id int;
+token_ids int[];
+centroids bytea[];
+centroid bytea;
+clusters int[];
+cluster_lens int[];
+processed boolean[];
+samples bytea[];
+rec RECORD;
 BEGIN
 EXECUTE 'SELECT get_vecs_name()' INTO table_name;
+-- get vectors of tokens
+FOR I IN array_lower(tokens, 1)..array_upper(tokens, 1) LOOP
+  formated[I] = replace(tokens[I], '''', '''''');
+  processed[I] = 'f';
+  token_ids[I] = I;
+END LOOP;
+-- select k random tokens
+FOR I IN 1..k LOOP
+  EXECUTE format('SELECT round(random()*%s+0.5)', array_upper(formated, 1)) INTO token_id;
+  EXECUTE format('SELECT vector FROM %s WHERE word = ''%s''', table_name, formated[token_id]) INTO centroid;
+  centroids[I] := centroid;
+  cluster_lens[I] := 0;
+END LOOP;
+-- knn search
+FOR J IN 1..10 LOOP
+  FOR rec IN EXECUTE format('
+    SELECT query as qid, x.tid, similarity
+    FROM %s(''%s''::bytea[], ''%s''::integer, ''%s''::varchar[])
+    INNER JOIN unnest(''%s''::int[], ''%s''::varchar[]) as x(tid, token) ON token = target
+    ORDER BY similarity DESC
+    ', function_name, centroids, array_upper(tokens, 1), formated, token_ids, formated) LOOP
+    IF processed[rec.tid] = 'f' THEN
+      clusters[rec.tid] := rec.qid;
+      cluster_lens[rec.qid] := cluster_lens[rec.qid] + 1;
+      processed[rec.tid] := 't';
+    END IF;
+  END LOOP;
+  -- recalculate centroids
+  IF J < 10 THEN
+    FOR I IN 1..k LOOP
+      -- sample vectors from clusters[I]
+      IF cluster_lens[I] = 0 THEN
+        EXECUTE format('
+          SELECT array_agg(vec)
+          FROM (SELECT round(random()*%s+0.5)
+            FROM generate_series(1,10) gs1(x)) r(x)
+          INNER JOIN unnest((SELECT array_agg(gs2.val)
+            FROM generate_series(1,%s) gs2(val))::int[],(ARRAY(SELECT vector FROM %s INNER JOIN unnest(''%s''::int[], ''%s''::varchar[]) x(i,t) ON t = word)::bytea[])) x(id, vec)
+          ON r.x = x.id
+          ', array_upper(tokens, 1), array_upper(tokens, 1), table_name, token_ids, formated) INTO samples;
+      ELSE
+        EXECUTE format('
+          SELECT array_agg(vec)
+          FROM (SELECT round(random()*%s+0.5)
+            FROM generate_series(1,10) gs1(x)) r(x)
+          INNER JOIN unnest((SELECT array_agg(gs2.val)
+            FROM generate_series(1,%s) gs2(val))::int[],(ARRAY(SELECT vector FROM %s INNER JOIN unnest(''%s''::int[], ''%s''::varchar[]) x(i,t) ON t = word WHERE i = %s)::bytea[])) x(id, vec)
+          ON r.x = x.id
+          ', cluster_lens[I], cluster_lens[I], table_name, clusters, formated, I) INTO samples;
+          -- apply centroid function on samples
+          centroids[I] := centroid_bytea(samples);
+          cluster_lens[I] := 0;
+      END IF;
+    END LOOP;
+    -- reset processed
+    FOR I IN array_lower(tokens, 1)..array_upper(tokens, 1) LOOP
+      processed[I] = 'f';
+    END LOOP;
+  END IF;
+END LOOP;
+-- output
+FOR I IN 1..array_upper(clusters, 1) LOOP
+  word := formated[I];
+  cluster := clusters[I];
+  RETURN NEXT;
+END LOOP;
+RETURN;
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION cluster_exact(tokens varchar(100)[], k integer) RETURNS  TABLE (word varchar(100), cluster integer) AS $$
+DECLARE
+formated varchar[];
+BEGIN
 FOR I IN array_lower(tokens, 1)..array_upper(tokens, 1) LOOP
   formated[I] = replace(tokens[I], '''', '''''');
 END LOOP;
-
 RETURN QUERY EXECUTE format('
-SELECT array_agg(word)
-FROM %s, cluster_pq_to_id(ARRAY(SELECT id FROM %s WHERE word = ANY (''%s''::varchar(100)[])), %s) AS (centroid float4[], ids int[])
-WHERE id = ANY ((ids)::integer[])
-GROUP BY centroid;
-', table_name, table_name, formated, k);
+  SELECT word, cluster FROM generic_cluster(''%s''::varchar[], %s, ''knn_search_in_batch'')', formated, k);
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION cluster_ivpq(tokens varchar(100)[], k integer) RETURNS  TABLE (word varchar(100), cluster integer) AS $$
+DECLARE
+formated varchar[];
+BEGIN
+FOR I IN array_lower(tokens, 1)..array_upper(tokens, 1) LOOP
+  formated[I] = replace(tokens[I], '''', '''''');
+END LOOP;
+RETURN QUERY EXECUTE format('
+  SELECT word, cluster FROM generic_cluster(''%s''::varchar[], %s, ''knn_in_ivpq_batch'')', formated, k);
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION cluster_pq(tokens varchar(100)[], k integer) RETURNS  TABLE (word varchar(100), cluster integer) AS $$
+DECLARE
+formated varchar[];
+BEGIN
+FOR I IN array_lower(tokens, 1)..array_upper(tokens, 1) LOOP
+  formated[I] = replace(tokens[I], '''', '''''');
+END LOOP;
+RETURN QUERY EXECUTE format('
+  SELECT word, cluster FROM generic_cluster(''%s''::varchar[], %s, ''knn_in_pq_batch'')', formated, k);
 END
 $$
 LANGUAGE plpgsql;
@@ -1154,7 +1380,6 @@ END
 $$
 LANGUAGE plpgsql;
 
--- TODO analogy_3cosadd_in_ivpq
 CREATE OR REPLACE FUNCTION analogy_3cosadd_in_ivpq(w1 varchar(100), w2 varchar(100), w3 varchar(100), input_set varchar(100)[], OUT result varchar(100))
 AS  $$
 DECLARE
@@ -1194,7 +1419,7 @@ AND (pqs.word != v2.word)
 AND (pqs.word != v3.word)
 ORDER BY cosine_similarity_bytea(vec_plus_bytea(vec_minus_bytea(v3.vector, v1.vector), v2.vector), v4.vector) DESC
 FETCH FIRST 1 ROWS ONLY
-', table_name, table_name, table_name, 4, table_name, formated, alpha, post_verif, method_flag, use_targetlist, confidence, double_threshold, table_name, table_name, replace(w1, '''', ''''''), replace(w2, '''', ''''''), replace(w3, '''', ''''''), formated) INTO result;
+', table_name, table_name, table_name, 4, table_name, formated, alpha, post_verif, method_flag, use_targetlist, confidence, double_threshold, table_name, table_name, replace(w1, '''', ''''''), replace(w2, '''', ''''''), replace(w3, '''', '''''')) INTO result;
 END
 $$
 LANGUAGE plpgsql;

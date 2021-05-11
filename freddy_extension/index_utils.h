@@ -228,7 +228,7 @@ void convert_int16_bytea(int16* input, bytea** output, int size);
 
 void convert_float4_bytea(float4* input, bytea** output, int size);
 
-inline float computePQDistanceInt16(float* preDists, int16* codes,
+static inline float computePQDistanceInt16(float* preDists, int16* codes,
                                     int cbPositions, int cbCodes) {
   float distance = 0;
   for (int l = 0; l < cbPositions; l++) {
@@ -237,7 +237,7 @@ inline float computePQDistanceInt16(float* preDists, int16* codes,
   return distance;
 }
 
-inline void addToTargetList(TargetListElem* targetLists, int queryVectorsIndex,
+static inline void addToTargetList(TargetListElem* targetLists, int queryVectorsIndex,
                             const int target_lists_size, const int method,
                             int16* codes, float4* vector, int wordId) {
   TargetListElem* currentTargetList = targetLists[queryVectorsIndex].last;
