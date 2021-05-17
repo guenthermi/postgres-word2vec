@@ -2,6 +2,8 @@
 
 FREDDY is a system based on Postgres which is able to use word embeddings exhibit the rich information encoded in textual values. Database systems often contain a lot of textual values which express a lot of latent semantic information which can not be exploited by standard SQL queries. We developed a Postgres extension which provides UDFs for word embedding operations to compare textual values according to there syntactic and semantic meaning.      
 
+This branch integrates the code of https://github.com/lukasstracke/postgres-word2vec/tree/hamming_linkedlist into FREDDY.
+
 ## Word Embedding operations
 
 ### Similarity Queries
