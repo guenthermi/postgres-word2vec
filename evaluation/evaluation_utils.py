@@ -377,10 +377,10 @@ def batch_measurement_precision(con, cur, k, resolution, basis, dataset_size, nu
     time_values = measurement_batch_precision(cur, con, size_values, k, number, dataset_size)
     return time_values
 
-def connect():
+def connect(db_name=STD_DB_NAME,user=STD_USER,password=STD_PASSWORD,host=STD_HOST):
     con = None
     try:
-        con = psycopg2.connect("dbname='" + STD_DB_NAME + "' user='" + STD_USER + "' host='" + STD_HOST + "' password='" + STD_PASSWORD + "'")
+        con = psycopg2.connect("dbname='" + db_name + "' user='" + user + "' host='" + host + "' password='" + password + "'")
     except:
         print('Can not connect to database')
         return

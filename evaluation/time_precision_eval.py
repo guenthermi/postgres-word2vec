@@ -57,13 +57,13 @@ markers['Baseline'] = dict(color= 'rgba(0, 0, 0, 1)', symbol='circle-dot', size=
 set_markers(markers, names[1:], MARKER_COLORS[0], alphas, 1)
 
 ivpqEv.set_num_iterations(num_iters)
-execution_times, inner_times, precision_values = ivpqEv.time_and_precision_measurement_for_ivpq_batch(con, cur, search_params, names, query, k, param_query, parameter_variables, number_of_query_samples, number_of_target_samples, small_sample_size)
+execution_times, inner_times, precision_values, _ = ivpqEv.time_and_precision_measurement_for_ivpq_batch(con, cur, search_params, names, query, k, param_query, parameter_variables, number_of_query_samples, number_of_target_samples, small_sample_size)
 for i in range(1, len(alphas)):
     alpha = alphas[i]
     search_params = [{'pvf':pvf, 'alpha':alpha, 'method':0}, {'pvf':pvf, 'alpha':alpha, 'method':1}, {'pvf':pvf, 'alpha':alpha, 'method':2}]
     names_new = ['PQ a='+ str(alpha), 'Exact a=' + str(alpha), 'PQ+PV a=' + str(alpha)]
     parameter_variables =  [[0], [0], pvf_values]
-    _, inner_times_new, precision_values_new = ivpqEv.time_and_precision_measurement_for_ivpq_batch(con, cur, search_params, names_new, query, k, param_query, parameter_variables, number_of_query_samples, number_of_target_samples, small_sample_size)
+    _, inner_times_new, precision_values_new, _ = ivpqEv.time_and_precision_measurement_for_ivpq_batch(con, cur, search_params, names_new, query, k, param_query, parameter_variables, number_of_query_samples, number_of_target_samples, small_sample_size)
     inner_times.update(inner_times_new)
     precision_values.update(precision_values_new)
     names += names_new

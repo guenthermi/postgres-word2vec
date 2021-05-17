@@ -3,6 +3,7 @@ from numpy import median
 from numpy import percentile
 import time
 import random
+import copy
 from collections import defaultdict
 import plotly.offline as py
 import plotly.graph_objs as go
@@ -154,6 +155,11 @@ def time_and_precision_measurement_for_ivpq_batch(con, cur, search_parameters, n
                 count+= 1;
                 print(str(round((count*100) / (NUM_ITERATIONS*sum([len(p) for p in parameter_variables])),2))+'%', end='\r')
     # evaluation phase
+    raw_data = {
+        'execution_times': copy.deepcopy(all_execution_times),
+        'inner_times': copy.deepcopy(all_inner_times),
+        'precision_values': copy.deepcopy(all_precision_values)
+    }
     for i, search_params in enumerate(search_parameters):
         for j, elem in enumerate(parameter_variables[i]):
             if outlier_detect:
@@ -167,7 +173,7 @@ def time_and_precision_measurement_for_ivpq_batch(con, cur, search_parameters, n
                     all_execution_times[names[i]][j] = mean(all_execution_times[names[i]][j])
                     all_inner_times[names[i]][j] = mean(all_inner_times[names[i]][j])
             all_precision_values[names[i]][j] = mean(all_precision_values[names[i]][j])
-    return all_execution_times, all_inner_times, all_precision_values
+    return all_execution_times, all_inner_times, all_precision_values, raw_data
 
 def plot_precision_graphs(parameter_variables, precision_values, names):
     data = []
