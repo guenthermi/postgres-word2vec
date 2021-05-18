@@ -7,16 +7,16 @@ from logger import *
 
 def get_vectors(filename, logger, max_count=10**9, normalization=True):
     f = open(filename)
-    line_splits = f.readline().split()
+    line_splits = f.readline().split(' ')
     logger.log(Logger.INFO, str(line_splits))
     size = int(line_splits[0])
     d = int(line_splits[1])
     words, vectors, count = [],np.zeros((size, d), dtype='float32'), 0
     logger.log(Logger.INFO, str(count))
     logger.log(Logger.INFO, str(line_splits))
-    while (line_splits) and (count < max_count):
+    while (line_splits != ['']) and (count < max_count):
         line = f.readline()
-        line_splits = line.split()
+        line_splits = line.split(' ')
         if not line_splits:
             break
         word = line_splits[0]
