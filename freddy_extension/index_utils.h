@@ -119,6 +119,12 @@ void updateTopK(TopK tk, float distance, int id, int k, int maxDist);
 void updateTopKPV(TopKPV tk, float distance, int id, int k, int maxDist,
                   float4* vector, int dim);
 
+void updateTopKFast(TopK tk, const int batchSize, int* fillLevel,
+                    float distance, int id, int k, float* maxDist,
+                    int* sortcount);
+
+void sortTopK(TopK tk, int first, int last, int k);
+
 void updateTopKWordEntry(char** term, char* word);
 
 void initTopK(TopK* pTopK, int k, const float maxDist);
@@ -219,6 +225,8 @@ int compare(const void* a, const void* b);
 void convert_bytea_int32(bytea* bstring, int32** output, int32* size);
 
 void convert_bytea_int16(bytea* bstring, int16** output, int* size);
+
+void convert_bytea_uint64(bytea* bstring, uint64_t** output, int* size);
 
 void convert_bytea_float4(bytea* bstring, float4** output, int* size);
 

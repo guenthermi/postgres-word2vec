@@ -343,6 +343,10 @@ CREATE OR REPLACE FUNCTION cosine_similarity_bytea(bytea, bytea) RETURNS float4
 AS '$libdir/freddy', 'cosine_similarity_bytea'
 LANGUAGE C IMMUTABLE STRICT;
 
+CREATE OR REPLACE FUNCTION hamming_dist_bytea(bytea, bytea) RETURNS integer
+AS '$libdir/freddy', 'hamming_dist_bytea'
+LANGUAGE C IMMUTABLE STRICT;
+
 CREATE OR REPLACE FUNCTION vec_minus(float[], float[]) RETURNS float[]
 AS '$libdir/freddy', 'vec_minus'
 LANGUAGE C IMMUTABLE STRICT;
@@ -375,6 +379,10 @@ CREATE OR REPLACE FUNCTION ivfadc_search(bytea, integer) RETURNS SETOF record
 AS '$libdir/freddy', 'ivfadc_search'
 LANGUAGE C IMMUTABLE STRICT;
 
+CREATE OR REPLACE FUNCTION knn_word2bits(bytea, integer) RETURNS SETOF record
+AS '$libdir/freddy', 'knn_word2bits'
+LANGUAGE C IMMUTABLE STRICT;
+
 CREATE OR REPLACE FUNCTION pq_search_in(bytea, integer, integer[]) RETURNS SETOF record
 AS '$libdir/freddy', 'pq_search_in'
 LANGUAGE C IMMUTABLE STRICT;
@@ -389,6 +397,14 @@ LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION ivfadc_batch_search(integer[], integer) RETURNS SETOF record
 AS '$libdir/freddy', 'ivfadc_batch_search'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION knn_word2bits_in_batch(bytea[], integer[], integer, integer[]) RETURNS SETOF record
+AS '$libdir/freddy', 'knn_word2bits_in_batch'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION knn_word2bits_in_batch_opt(bytea[], integer[], integer, integer[], integer) RETURNS SETOF record
+AS '$libdir/freddy', 'knn_word2bits_in_batch_opt'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OR REPLACE FUNCTION grouping_pq(integer[], integer[]) RETURNS SETOF record
@@ -896,6 +912,79 @@ RETURN QUERY EXECUTE format('
 SELECT f.word, g.word, (1.0 - (distance / 2.0))::float4 as similarity
 FROM pq_search_in_batch(''%s''::bytea[], ''%s''::integer[], ''%s''::int, ARRAY(SELECT id FROM %s WHERE word = ANY(''%s''::varchar(100)[])), ''%s'') AS (qid integer, tid integer, distance float4) INNER JOIN %s AS f ON qid = f.id INNER JOIN %s AS g ON tid = g.id;
 ', vectors, ids, k, table_name, formated, use_targetlist, table_name, table_name);
+END
+$$
+LANGUAGE plpgsql;
+
+
+CREATE OR REPLACE FUNCTION knn_in_word2bits_batch(query_set bytea[], k integer, target_set varchar[]) RETURNS TABLE (query integer, target varchar, distance integer) AS $$
+DECLARE
+table_name varchar;
+ids integer[];
+BEGIN
+EXECUTE 'SELECT get_vecs_name_original()' INTO table_name;
+EXECUTE format('SELECT array_agg(x) FROM generate_series(1,%s) x',array_upper(query_set, 1)) INTO ids;
+-- create lookup id -> query_word
+RETURN QUERY EXECUTE format(
+  'SELECT qid, v.word, distance '
+  'FROM knn_word2bits_in_batch($1::bytea[], $2::integer[], $3::integer, ARRAY(SELECT id FROM %s WHERE word = ANY($4::varchar(100)[]))) '
+  'AS (qid integer, tid integer, distance integer) INNER JOIN %s AS v ON tid = v.id;',
+  table_name, table_name)
+  USING query_set, ids, k, target_set;
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION knn_in_word2bits_batch(query_set varchar[], k integer, target_set varchar[]) RETURNS TABLE (query integer, target varchar, distance integer) AS $$
+DECLARE
+table_name varchar;
+ids integer[];
+BEGIN
+EXECUTE 'SELECT get_vecs_name_original()' INTO table_name;
+EXECUTE format('SELECT array_agg(x) FROM generate_series(1,%s) x',array_upper(query_set, 1)) INTO ids;
+-- create lookup id -> query_word
+RETURN QUERY EXECUTE format(
+  'SELECT qid, v.word, distance '
+  'FROM knn_word2bits_in_batch(ARRAY(SELECT vector FROM %s WHERE word = ANY($1::varchar[]))::bytea[], $2::integer[], $3::integer, ARRAY(SELECT id FROM %s WHERE word = ANY($4::varchar(100)[]))) '
+  'AS (qid integer, tid integer, distance integer) INNER JOIN %s AS v ON tid = v.id;',
+  table_name, table_name, table_name)
+  USING query_set, ids, k, target_set;
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION knn_in_word2bits_batch_opt(query_set bytea[], k integer, target_set varchar[], batch_size integer) RETURNS TABLE (query integer, target varchar, distance integer) AS $$
+DECLARE
+table_name varchar;
+ids integer[];
+BEGIN
+EXECUTE 'SELECT get_vecs_name_original()' INTO table_name;
+EXECUTE format('SELECT array_agg(x) FROM generate_series(1,%s) x',array_upper(query_set, 1)) INTO ids;
+-- create lookup id -> query_word
+RETURN QUERY EXECUTE format(
+  'SELECT qid, v.word, distance '
+  'FROM knn_word2bits_in_batch_opt($1::bytea[], $2::integer[], $3::integer, ARRAY(SELECT id FROM %s WHERE word = ANY($4::varchar(100)[])), $5::integer) '
+  'AS (qid integer, tid integer, distance integer) INNER JOIN %s AS v ON tid = v.id;',
+  table_name, table_name)
+  USING query_set, ids, k, target_set, batch_size;
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION knn_in_word2bits_batch_opt(query_set varchar[], k integer, target_set varchar[], batch_size integer) RETURNS TABLE (query integer, target varchar, distance integer) AS $$
+DECLARE
+table_name varchar;
+ids integer[];
+BEGIN
+EXECUTE 'SELECT get_vecs_name_original()' INTO table_name;
+EXECUTE format('SELECT array_agg(x) FROM generate_series(1,%s) x',array_upper(query_set, 1)) INTO ids;
+-- create lookup id -> query_word
+RETURN QUERY EXECUTE format(
+  'SELECT qid, v.word, distance '
+  'FROM knn_word2bits_in_batch_opt(ARRAY(SELECT vector FROM %s WHERE word = ANY($1::varchar[]))::bytea[], $2::integer[], $3::integer, ARRAY(SELECT id FROM %s WHERE word = ANY($4::varchar(100)[])), $5::integer) '
+  'AS (qid integer, tid integer, distance integer) INNER JOIN %s AS v ON tid = v.id;',
+  table_name, table_name, table_name)
+  USING query_set, ids, k, target_set, batch_size;
 END
 $$
 LANGUAGE plpgsql;

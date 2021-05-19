@@ -16,6 +16,30 @@
 
 // clang-format on
 
+static inline void topKSwap(TopK tk, int i, int j) {
+  TopKEntry swapEntry;
+  swapEntry = tk[j];
+  tk[j] = tk[i];
+  tk[i] = swapEntry;
+}
+
+static int partition(TopK tk, int first, int last) {
+  TopKEntry pivot = tk[(first + last) / 2];
+  int i = first;
+  int j = last;
+  for (;;) {
+    while (tk[i].distance < pivot.distance)
+      i++;
+    while (tk[j].distance > pivot.distance)
+      j--;
+    if (i >= j)
+      return j;
+    topKSwap(tk, i, j);
+    i++;
+    j--;
+  }
+}
+
 void updateTopK(TopK tk, float distance, int id, int k, int maxDist) {
   int i;
   for (i = k - 1; i >= 0; i--) {
@@ -49,6 +73,27 @@ void updateTopKPV(TopKPV tk, float distance, int id, int k, int maxDist,
   tk[i].distance = distance;
   tk[i].id = id;
   tk[i].vector = vector;
+}
+
+void sortTopK(TopK tk, int first, int last, int k) {
+  if (first < last) {
+    int pivotIndex = partition(tk, first, last);
+    sortTopK(tk, first, pivotIndex, k);
+    if (pivotIndex < k - 1) {
+      sortTopK(tk, pivotIndex + 1, last, k);
+    }
+  }
+}
+
+void updateTopKFast(TopK tk, const int batchSize, int* fillLevel, float distance, int id, int k, float* maxDist, int* sortcount) {
+  tk[*fillLevel].id = id;
+  tk[*fillLevel].distance = distance;
+  (*fillLevel)++;
+  if (*fillLevel > (batchSize - 1)) {
+    sortTopK(tk, 0, (*fillLevel)-1, k);
+    *fillLevel = k;
+    (*sortcount)++;
+  }
 }
 
 void updateTopKWordEntry(char** term, char* word) {
@@ -1093,6 +1138,16 @@ void convert_bytea_int16(bytea* bstring, int16** output, int* size) {
     *size = (VARSIZE(bstring) - VARHDRSZ) / sizeof(int16);
   }
   memcpy(*output, ptr, (*size) * sizeof(int16));
+}
+
+void convert_bytea_uint64(bytea* bstring, uint64_t** output, int* size) {
+  uint64_t* ptr = (uint64_t*)VARDATA(bstring);
+  if (*size == 0) {  // if size value is given it is assumed that memory is
+                     // already allocated
+    *output = palloc((VARSIZE(bstring) - VARHDRSZ));
+    *size = (VARSIZE(bstring) - VARHDRSZ) / sizeof(uint64_t);
+  }
+  memcpy(*output, ptr, (*size) * sizeof(uint64_t));
 }
 
 void convert_bytea_float4(bytea* bstring, float4** output, int* size) {
