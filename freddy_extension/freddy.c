@@ -1335,7 +1335,7 @@ Datum knn_word2bits_in_batch(PG_FUNCTION_ARGS) {
 
   if (SRF_IS_FIRSTCALL()) {
     struct timeval start, start_query, start_database, start_distances;
-    struct timeval end, end_query, end_database, end_distances;
+    struct timeval end, end_init, end_query, end_database, end_distances;
 
     uint64_t** queryVectors;
     int queryVectorsSize;
@@ -1404,6 +1404,11 @@ Datum knn_word2bits_in_batch(PG_FUNCTION_ARGS) {
 
     initTopKs(&topKs, &maxDists, queryVectorsSize, k, MAX_DIST);
 
+    gettimeofday(&end_init, NULL);
+    elog(INFO, "TRACK initialization_time %f",
+            (end_init.tv_sec * 1000.0 + end_init.tv_usec / 1000.0) -
+            (start.tv_sec * 1000.0 + start.tv_usec / 1000.0));
+
     gettimeofday(&start_query, NULL);
 
     //DB-Anfrage
@@ -1420,25 +1425,27 @@ Datum knn_word2bits_in_batch(PG_FUNCTION_ARGS) {
     }
     sprintf(cur, ")");
 
+    pfree(inputIds);
+
     gettimeofday(&end_query, NULL);
     // elog(INFO, "HAMMING SLOW");
-    elog(INFO, "query construction time %f",
+    elog(INFO, "TRACK query_construction_time %f",
             (end_query.tv_sec * 1000.0 + end_query.tv_usec / 1000.0) -
             (start_query.tv_sec * 1000.0 + start_query.tv_usec / 1000.0));
 
-    pfree(inputIds);
-
-    SPI_connect();
     gettimeofday(&start_database, NULL);
+    SPI_connect();
     // elog(INFO, "command: %s", command);
     rInfo.ret = SPI_execute(command, true, 0);
-    gettimeofday(&end_database, NULL);
-    elog(INFO, "get vectors from database time %f",
-            (end_database.tv_sec * 1000.0 + end_database.tv_usec / 1000.0) -
-            (start_database.tv_sec * 1000.0 + start_database.tv_usec / 1000.0));
     pfree(command);
     rInfo.proc = SPI_processed;
-    elog(INFO, "retrieved %d results", rInfo.proc);
+    gettimeofday(&end_database, NULL);
+    elog(INFO, "TRACK get_vectors_from_database_time %f",
+            (end_database.tv_sec * 1000.0 + end_database.tv_usec / 1000.0) -
+            (start_database.tv_sec * 1000.0 + start_database.tv_usec / 1000.0));
+    // elog(INFO, "retrieved %d results", rInfo.proc);
+
+    gettimeofday(&start_distances, NULL);
 
     if (rInfo.ret > 0 && SPI_tuptable != NULL) {
       TupleDesc tupdesc = SPI_tuptable->tupdesc;
@@ -1450,7 +1457,6 @@ Datum knn_word2bits_in_batch(PG_FUNCTION_ARGS) {
       int bitvec_xor;
       int distance;
 
-      gettimeofday(&start_distances, NULL);
       for (int targetVectorsIndex = 0; targetVectorsIndex < rInfo.proc; targetVectorsIndex++) {
         HeapTuple tuple = tuptable->vals[targetVectorsIndex];
         wordId = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &rInfo.info));
@@ -1472,7 +1478,7 @@ Datum knn_word2bits_in_batch(PG_FUNCTION_ARGS) {
     }
 
     gettimeofday(&end_distances, NULL);
-    elog(INFO, "distances time %f",
+    elog(INFO, "TRACK distance_calculation_time %f",
             (end_distances.tv_sec * 1000.0 + end_distances.tv_usec / 1000.0) -
             (start_distances.tv_sec * 1000.0 + start_distances.tv_usec / 1000.0));
 
@@ -1492,7 +1498,7 @@ Datum knn_word2bits_in_batch(PG_FUNCTION_ARGS) {
     attinmeta = TupleDescGetAttInMetadata(outtertupdesc);
     funcctx->attinmeta = attinmeta;
     gettimeofday(&end, NULL);
-    elog(INFO, "total time %f",
+    elog(INFO, "TRACK total_time %f",
             (end.tv_sec * 1000.0 + end.tv_usec / 1000.0) -
             (start.tv_sec * 1000.0 + start.tv_usec / 1000.0));
     MemoryContextSwitchTo(oldcontext);
@@ -1534,7 +1540,7 @@ Datum knn_word2bits_in_batch_opt(PG_FUNCTION_ARGS) {
 
   if (SRF_IS_FIRSTCALL()) {
     struct timeval start, start_query, start_database, start_distances;
-    struct timeval end, end_query, end_database, end_distances;
+    struct timeval end, end_init, end_query, end_database, end_distances;
 
     uint64_t** queryVectors;
     int queryVectorsSize;
@@ -1616,6 +1622,11 @@ Datum knn_word2bits_in_batch_opt(PG_FUNCTION_ARGS) {
       fillLevels[i] = k;
     }
 
+    gettimeofday(&end_init, NULL);
+    elog(INFO, "TRACK initialization_time %f",
+            (end_init.tv_sec * 1000.0 + end_init.tv_usec / 1000.0) -
+            (start.tv_sec * 1000.0 + start.tv_usec / 1000.0));
+
     gettimeofday(&start_query, NULL);
 
     //DB-Anfrage
@@ -1632,25 +1643,27 @@ Datum knn_word2bits_in_batch_opt(PG_FUNCTION_ARGS) {
     }
     sprintf(cur, ")");
 
+    pfree(inputIds);
+
     gettimeofday(&end_query, NULL);
     // elog(INFO, "HAMMING FAST");
-    elog(INFO, "query construction time %f",
+    elog(INFO, "TRACK query_construction_time %f",
             (end_query.tv_sec * 1000.0 + end_query.tv_usec / 1000.0) -
             (start_query.tv_sec * 1000.0 + start_query.tv_usec / 1000.0));
 
-    pfree(inputIds);
-
-    SPI_connect();
     gettimeofday(&start_database, NULL);
+    SPI_connect();
     // elog(INFO, "command: %s", command);
     rInfo.ret = SPI_execute(command, true, 0);
+    pfree(command);
     gettimeofday(&end_database, NULL);
-    elog(INFO, "get vectors from database time %f",
+    elog(INFO, "TRACK get_vectors_from_database_time %f",
             (end_database.tv_sec * 1000.0 + end_database.tv_usec / 1000.0) -
             (start_database.tv_sec * 1000.0 + start_database.tv_usec / 1000.0));
-    pfree(command);
     rInfo.proc = SPI_processed;
     elog(INFO, "retrieved %d results", rInfo.proc);
+
+    gettimeofday(&start_distances, NULL);
 
     if (rInfo.ret > 0 && SPI_tuptable != NULL) {
       TupleDesc tupdesc = SPI_tuptable->tupdesc;
@@ -1662,7 +1675,6 @@ Datum knn_word2bits_in_batch_opt(PG_FUNCTION_ARGS) {
       int bitvec_xor;
       int distance;
 
-      gettimeofday(&start_distances, NULL);
       for (int targetVectorsIndex = 0; targetVectorsIndex < rInfo.proc; targetVectorsIndex++) {
         HeapTuple tuple = tuptable->vals[targetVectorsIndex];
         wordId = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &rInfo.info));
@@ -1690,10 +1702,9 @@ Datum knn_word2bits_in_batch_opt(PG_FUNCTION_ARGS) {
     }
 
     gettimeofday(&end_distances, NULL);
-    elog(INFO, "distances time %f, sorted %d times",
+    elog(INFO, "TRACK distance_calculation_time %f",
             (end_distances.tv_sec * 1000.0 + end_distances.tv_usec / 1000.0) -
-            (start_distances.tv_sec * 1000.0 + start_distances.tv_usec / 1000.0),
-            sortcount);
+            (start_distances.tv_sec * 1000.0 + start_distances.tv_usec / 1000.0));
 
     SPI_finish();
 
@@ -1711,7 +1722,7 @@ Datum knn_word2bits_in_batch_opt(PG_FUNCTION_ARGS) {
     attinmeta = TupleDescGetAttInMetadata(outtertupdesc);
     funcctx->attinmeta = attinmeta;
     gettimeofday(&end, NULL);
-    elog(INFO, "total time %f",
+    elog(INFO, "TRACK total_time %f",
             (end.tv_sec * 1000.0 + end.tv_usec / 1000.0) -
             (start.tv_sec * 1000.0 + start.tv_usec / 1000.0));
     MemoryContextSwitchTo(oldcontext);
