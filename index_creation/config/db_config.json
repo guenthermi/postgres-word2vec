@@ -2,7 +2,7 @@
 	"username": "postgres",
 	"password": "postgres",
 	"host": "localhost",
-	"db_name": "imdb",
+	"db_name": "db_name",
 	"batch_size": 50000,
 	"log": ""
 }
