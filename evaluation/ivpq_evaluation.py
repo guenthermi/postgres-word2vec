@@ -22,7 +22,7 @@ def set_search_params(con, cur, search_params):
     cur.execute('SELECT set_method_flag({:d});'.format(search_params['method']))
     con.commit()
 
-add_escapes = lambda x: "'{" + ",".join([s.replace("'", "''").replace("\"", "\\\"").replace("{", "\{").replace("}", "\}").replace(",", "\,") for s in x]) + "}'"
+add_escapes = lambda x: "'{" + ",".join([s.replace("\\", "\\\\").replace("'", "''").replace("\"", "\\\"").replace("{", "\{").replace("}", "\}").replace(",", "\,") for s in x]) + "}'"
 
 def is_outlier(value, ar):
     if (value > percentile(ar, 20)) and (value < percentile(ar, 80)):
