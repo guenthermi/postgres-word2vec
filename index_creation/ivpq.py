@@ -11,6 +11,7 @@ import quantizer_creation as qcreator
 import database_export as db_export
 
 USE_BYTEA_TYPE = True
+CREATE_STATS_TABLE = False
 COARSE_TYPE = 'MULTI_INDEX'
 
 # converts centroid tupel to id
@@ -259,7 +260,7 @@ def main(argc, argv):
         'coarse_id', con, cur, logger)
 
     # create statistics
-    if (index_config.has_key('statistic_table') and index_config.has_key('statistic_column')):
+    if (index_config.has_key('statistic_table') and index_config.has_key('statistic_column') and CREATE_STATS_TABLE):
         utils.create_statistics_table(index_config.get_value('statistic_table'), index_config.get_value('statistic_column'), index_config.get_value('coarse_table_name'), con, cur, logger)
 
     utils.enable_triggers(index_config.get_value('fine_table_name'), con, cur)

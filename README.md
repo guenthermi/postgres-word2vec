@@ -17,15 +17,14 @@ INNER JOIN word_embeddings AS w ON w.word = 'comedy'
 ORDER BY cosine_similarity(w.vector, v.vector) DESC;
 ```
 
-### Analogy Queries based on 3CosAdd
+### Analogy Queries
 ```
-cosadd_pq(float[], float[], float[])
-cosadd_pq(varchar, varchar, varchar)
+analogy(varchar, varchar, varchar)
 ```
 **Example**
 ```
 SELECT *
-FROM cosadd_pq('Francis_Ford_Coppola', 'Godfather', 'Christopher_Nolan');
+FROM analogy('Francis_Ford_Coppola', 'Godfather', 'Christopher_Nolan');
 
 ```
 ### K Nearest Neighbour Queries
@@ -66,12 +65,12 @@ FROM knn_join(ARRAY(SELECT title FROM movies), 5, ARRAY(SELECT title FROM movies
 ### Grouping
 
 ```
-grouping_func(varchar[], varchar[])
+groups(varchar[], varchar[])
 ```
 **Example**
 ```
-SELECT term, groupterm
-FROM grouping_func(ARRAY(SELECT title FROM movies), '{Europe,America}');
+SELECT *
+FROM groups(ARRAY(SELECT title FROM movies), '{Europe,America}');
 ```
 
 ## Indexes
