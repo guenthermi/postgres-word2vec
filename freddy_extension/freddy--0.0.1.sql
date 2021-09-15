@@ -376,6 +376,10 @@ CREATE OR REPLACE FUNCTION insert_batch(varchar(100)[]) RETURNS integer
 AS '$libdir/freddy', 'insert_batch'
 LANGUAGE C IMMUTABLE STRICT;
 
+CREATE OR REPLACE FUNCTION infer_vector(varchar(100), integer) RETURNS float[]
+AS '$libdir/freddy', 'infer_vector'
+LANGUAGE C IMMUTABLE STRICT;
+
 CREATE OR REPLACE FUNCTION centroid(anyarray) RETURNS anyarray
 AS '$libdir/freddy', 'centroid'
 LANGUAGE C IMMUTABLE STRICT;

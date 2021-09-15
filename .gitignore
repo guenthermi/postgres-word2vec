@@ -1,5 +1,6 @@
 vectors/
 evaluation/reports/
+sql_queries/
 *__pycache__/
 *.o
 *.so

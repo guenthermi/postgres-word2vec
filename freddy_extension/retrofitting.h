@@ -30,14 +30,14 @@ typedef struct RelationColumnData {
     CardinalityData* cardinalities;
 } RelationColumnData;
 
-typedef struct RelationData {
+typedef struct RelationDataObj {
     char* relation_name;
     char* name;
     RelationColumnData* col1;
     RelationColumnData* col2;
     int max_r;
     int max_c;
-} RelationData;
+} RelationDataObj;
 
 typedef struct RelNumData {
     char* rel;
@@ -49,6 +49,37 @@ typedef struct DeltaElem {
     char* value;
 } DeltaElem;
 
+typedef struct RelationStats {
+  char* name;
+  int col1;
+  int col2;
+  int max_r;
+} RelationStats;
+
+typedef struct CardinalityCount {
+  char* word;
+  int colId;
+  int count;
+} CardinalityCount;
+
+typedef struct RelNumEntry {
+  char* word;
+  bool* relations;
+  int rel_num;
+} RelNumEntry;
+
+typedef struct RelColEntry {
+  int id;
+  char* word;
+  float* centroid;
+  int size;
+} RelColEntry;
+
+typedef struct DeltaWord {
+  char* word;
+  bool changed;
+} DeltaWord;
+
 typedef struct DeltaCat {
     char* name;
     char* type;
@@ -57,6 +88,8 @@ typedef struct DeltaCat {
     char* query;
     int inferredElementCount;
     DeltaElem* inferredElements;
+    int changedElementsCount;
+    char** changedElements;
 } DeltaCat;
 
 typedef struct DeltaRelElem {
@@ -64,6 +97,8 @@ typedef struct DeltaRelElem {
     char* type;
     int elementCount;
     DeltaElem* elements;
+    int changedElementsCount;
+    char** changedElements;
 } DeltaRelElem;
 
 typedef struct DeltaRel {
@@ -120,6 +155,20 @@ typedef struct WordVec {
     int dim;
 } WordVec;
 
+typedef struct RetroExport {
+    char* word;
+    float* oldVector;
+    float* newVector;
+    float* nominator;
+    float denominator;
+} RetroExport;
+
+typedef struct ColMean {
+    char* word;
+    int size;
+    float* vector;
+} ColMean;
+
 typedef struct RadixTree {
     char* value;
     float* vector;
@@ -159,15 +208,19 @@ char* sprintf_json(const char* json, jsmntok_t* t);
 
 char* escape(char* str);
 
+char* remove_escapes(const char* s);
+
 ColumnData* getColumnData(const char* json, jsmntok_t* t, int k, int* columnDataSize);
 
 CardinalityData* getCardinalities(const char* json, jsmntok_t* t, int k, int size, int* count);
 
 RelationColumnData* getRelationColumnData(const char* json, jsmntok_t* t, int k, int* relationDataSize);
 
-RelationData* getRelationData(const char* json, jsmntok_t* t, int k, int* relationDataSize);
+RelationDataObj* getRelationData(const char* json, jsmntok_t* t, int k, int* relationDataSize);
 
 RelNumData* getRelNumData(const char* json, jsmntok_t* t, int k, int* relNumDataSize);
+
+char** getStringElems(const char* json, jsmntok_t* t, int k, int* elemSize);
 
 DeltaElem* getDeltaElems(const char* json, jsmntok_t* t, int k, int* elemSize);
 
@@ -183,7 +236,7 @@ void updateCardinalityStatistics(struct CardinalityData* cardinalityData, int co
 
 char* updateRelColStatistics(struct RelationColumnData* relationColumnData);
 
-void insertRelationStatistics(struct RelationData* relationData, int count);
+void insertRelationStatistics(struct RelationDataObj* relationData, int count);
 
 void insertRelNumDataStatistics(RelNumData* relNumData, int relCount);
 
@@ -193,9 +246,49 @@ int wordVecCompare(const void *a, const void *b, void *udata);
 
 uint64_t wordVecHash(const void *item, uint64_t seed0, uint64_t seed1);
 
-struct hashmap* getWordVecs(char* tableName, int* dim);
+int retroExportCompare(const void *a, const void *b, void *udata);
+
+uint64_t retroExportHash(const void *item, uint64_t seed0, uint64_t seed1);
+
+int colMeanCompare(const void *a, const void *b, void *udata);
+
+uint64_t colMeanHash(const void *item, uint64_t seed0, uint64_t seed1);
+
+int CardinalityCountCompare(const void *a, const void *b, void *udata);
+
+uint64_t CardinalityCountHash(const void *item, uint64_t seed0, uint64_t seed1);
+
+int RelNumEntryCompare(const void *a, const void *b, void *udata);
+
+uint64_t RelNumEntryHash(const void *item, uint64_t seed0, uint64_t seed1);
+
+uint64_t RelNumEntryHash(const void *item, uint64_t seed0, uint64_t seed1);
+
+int RelColEntryCompare(const void *a, const void *b, void *udata);
+
+uint64_t RelColEntryHash(const void *item, uint64_t seed0, uint64_t seed1);
+
+int DeltaWordCompare(const void *a, const void *b, void *udata);
+
+uint64_t DeltaWordHash(const void *item, uint64_t seed0, uint64_t seed1);
+
+int RelationStatsCompare(const void *a, const void *b, void *udata);
+
+uint64_t RelationStatsHash(const void *item, uint64_t seed0, uint64_t seed1);
+
+bool iterUpdateCardinalities(const void* item, void* data);
+
+bool iterRelNumStats(const void* item, void* data);
+
+struct hashmap* getWordVecs(char* tableName, int* dim, bool ignore_terms_with_spaces);
 
 WordVec* getWordVec(char* tableName, char* word);
+
+char* encodeEmbeddingForQuery(char* term, float* vector, int dim);
+
+void insertRetroVecsInDB(const char* tableName, struct hashmap* retroVecs, DeltaCat* deltaCat, int deltaCatCount, int dim);
+
+struct hashmap* backupOldRetroVecs(struct hashmap* retroVecs, DeltaCat* deltaCat, int deltaCatCount, int dim);
 
 int getIntFromDB(char* query);
 
@@ -209,19 +302,21 @@ void deleteRetroVecsDB(const char* tableName);
 
 void retroVecsToDB(const char* tableName, struct hashmap* retroVecs, int dim);
 
-float* calcColMean(char* tableName, char* column, char* vecTable, RadixTree* vecTree, const char* tokenization, int dim);
+ColMean* loadColMeanFromDB(char* tabCol, int dim);
 
-void insertColMeanToDB(char* tabCol, float* mean, const char* tokenization, int dim);
+struct hashmap* loadAllColMeansFromDB(ProcessedDeltaEntry* processedDelta, int processedDeltaCount, int dim);
 
-float* getColMeanFromDB(char* tabCol, const char* tokenization, int dim);
+void storeColMean(char* catName, float* new_mean, int size, int dim);
 
-float* getColMean(char* column, char* vecTable, RadixTree* vecTree, const char* tokenization, int dim);
+struct hashmap* loadAllRelColEntries(void);
 
 float* calcCentroid(ProcessedRel* relation, char* retroVecTable, int dim);
 
 void updateCentroidInDB(ProcessedRel* relation, float* centroid, int dim);
 
 float* getCentroidFromDB(ProcessedRel* relation);
+
+void storeRelColEntry(int colId, float* newCentroid, int size, int dim);
 
 float* getCentroid(ProcessedRel* relation, char* retroVecTable, int dim);
 
@@ -245,7 +340,7 @@ RadixTree* buildRadixTree(struct hashmap* vecs, int dim);
 
 void inferAdd(float* result, RadixTree* tree, int* tokens, const char* tokenizationStrategy, int dim);
 
-float* inferVec(char* term, RadixTree* tree, char* delimiter, const char* tokenizationStrategy, int dim);
+void inferVec(float* result, const char* term, RadixTree* tree, char* delimiter, const char* tokenizationStrategy, int dim);
 
 void sumVecs(float* f1, float* f2, int dim);
 
@@ -256,6 +351,8 @@ void subFromVec(float* vec1, float sub, int dim);
 void subVecs(float* vec1, float* vec2, int dim);
 
 void multVec(float* vec, int mult, int dim);
+
+void multVecs(float* vec1, float* vec2, int dim);
 
 void multVecF(float* vec, float mult, int dim);
 
@@ -269,7 +366,7 @@ int isZeroVec(float* vec, int dim);
 
 void printVec(float* vec, int dim);
 
-char** getNToks(char* word, char* delim, int size);
+char** getNToks(char* word, const char* delim, int size);
 
 char** getTableAndCol(char* word);
 
@@ -283,9 +380,21 @@ int dbElemCompare(const void *a, const void *b, void *data);
 
 uint64_t dbElemHash(const void *item, uint64_t seed0, uint64_t seed1);
 
-struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processedDeltaCount, struct hashmap* retroVecs, RetroConfig* retroConfig, RadixTree* vecTree, retroPointer* pointer, int dim);
+struct hashmap* calcRetroVecs(ProcessedDeltaEntry* processedDelta, int processedDeltaCount, struct hashmap* retroVecs, RetroConfig* retroConfig, RadixTree* vecTree, retroPointer* pointer, struct hashmap* allColMeans, int dim);
+
+struct hashmap* determineChangedElements(DeltaCat* deltaCat, int deltaCatCount);
+
+void updateStatsBefore(struct hashmap* deltaWords, DeltaCat* deltaCat, DeltaRel* deltaRel, int deltaCatCount, int deltaRelCount);
+
+void updateStatsAfter(struct hashmap* deltaWords, DeltaCat* deltaCat, DeltaRel* deltaRel, int deltaCatCount, int deltaRelCount, struct hashmap* retroVecs, struct hashmap* oldVecs, struct hashmap* allColMeans, int dim);
+
+struct hashmap* getRelationStats(void);
 
 bool iterUpdate(const void* item, void* data);
+
+bool iterOutput(const void* item, void* data);
+
+bool iterStoreVectors(const void* item, void* data);
 
 void updateRetroVecs(struct hashmap* retroVecs, struct hashmap* newVecs);
 

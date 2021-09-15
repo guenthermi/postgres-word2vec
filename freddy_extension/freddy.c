@@ -11,6 +11,7 @@
 #include "stdlib.h"
 #include "time.h"
 #include "utils/lsyscache.h"
+#include "sys/stat.h"
 
 #include "hashmap.h"
 
@@ -24,6 +25,8 @@
 #include "retrofitting.h"
 
 #include "assert.h"
+
+
 
 // clang-format on
 
@@ -148,7 +151,7 @@ Datum pq_search(PG_FUNCTION_ARGS) {
     usrfctx = (UsrFctx*)palloc(sizeof(UsrFctx));
     fillUsrFctx(usrfctx, topK, k);
     funcctx->user_fctx = (void*)usrfctx;
-    outtertupdesc = CreateTemplateTupleDesc(2);
+    outtertupdesc = CreateTemplateTupleDesc(2, false);
     TupleDescInitEntry(outtertupdesc, 1, "Id", INT4OID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 2, "Distance", FLOAT4OID, -1, 0);
     attinmeta = TupleDescGetAttInMetadata(outtertupdesc);
@@ -389,7 +392,7 @@ Datum ivfadc_search(PG_FUNCTION_ARGS) {
     usrfctx = (UsrFctx*)palloc(sizeof(UsrFctx));
     fillUsrFctx(usrfctx, topK, k);
     funcctx->user_fctx = (void*)usrfctx;
-    outtertupdesc = CreateTemplateTupleDesc(2);
+    outtertupdesc = CreateTemplateTupleDesc(2, false);
     TupleDescInitEntry(outtertupdesc, 1, "Id", INT4OID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 2, "Distance", FLOAT4OID, -1, 0);
     attinmeta = TupleDescGetAttInMetadata(outtertupdesc);
@@ -649,7 +652,7 @@ Datum pq_search_in_batch(PG_FUNCTION_ARGS) {
     usrfctx = (UsrFctxBatch*)palloc(sizeof(UsrFctxBatch));
     fillUsrFctxBatch(usrfctx, queryIds, queryVectorsSize, topKs, k);
     funcctx->user_fctx = (void*)usrfctx;
-    outtertupdesc = CreateTemplateTupleDesc(3);
+    outtertupdesc = CreateTemplateTupleDesc(3, false);
 
     TupleDescInitEntry(outtertupdesc, 1, "QueryId", INT4OID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 2, "TargetId", INT4OID, -1, 0);
@@ -853,11 +856,12 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS) {
       finished = true;
       for (int i = 0; i < queryVectorsSize;
            i++) {  // determine coarse quantizations (and residual vectors)
+        Blacklist* newBl;
         if (foundInstances[i] >= k) {
           continue;
         }
 
-        Blacklist* newBl;
+
 
         // get coarse_quantization(queryVector) (id)
         minDist = 1000;
@@ -910,10 +914,11 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS) {
         }
       }
       for (int i = 0; i < queryVectorsSize; i++) {
+        int j = 0;
         if (foundInstances[i] >= k) {
           continue;
         }
-        int j = 0;
+
         while (cqTableIds[cqIds[i]][j]) {
           j++;
         }
@@ -994,7 +999,7 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS) {
     usrfctx = (UsrFctxBatch*)palloc(sizeof(UsrFctxBatch));
     fillUsrFctxBatch(usrfctx, idArray, queryVectorsSize, topKs, k);
     funcctx->user_fctx = (void*)usrfctx;
-    outtertupdesc = CreateTemplateTupleDesc(3);
+    outtertupdesc = CreateTemplateTupleDesc(3, false);
 
     TupleDescInitEntry(outtertupdesc, 1, "QueryId", INT4OID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 2, "Id", INT4OID, -1, 0);
@@ -1155,7 +1160,7 @@ Datum pq_search_in(PG_FUNCTION_ARGS) {
       usrfctx = (UsrFctx*)palloc(sizeof(UsrFctx));
       fillUsrFctx(usrfctx, topK, k);
       funcctx->user_fctx = (void*)usrfctx;
-      outtertupdesc = CreateTemplateTupleDesc(2);
+      outtertupdesc = CreateTemplateTupleDesc(2, false);
       TupleDescInitEntry(outtertupdesc, 1, "Id", INT4OID, -1, 0);
       TupleDescInitEntry(outtertupdesc, 2, "Distance", FLOAT4OID, -1, 0);
       attinmeta = TupleDescGetAttInMetadata(outtertupdesc);
@@ -1404,7 +1409,7 @@ Datum cluster_pq(PG_FUNCTION_ARGS) {
     usrfctx->values[0] = (char*)palloc((18 * vectorSize + 4) * sizeof(char));
     usrfctx->values[1] = (char*)palloc((inputIdsSize * 8) * sizeof(char));
     funcctx->user_fctx = (void*)usrfctx;
-    outtertupdesc = CreateTemplateTupleDesc(2);
+    outtertupdesc = CreateTemplateTupleDesc(2, false);
     TupleDescInitEntry(outtertupdesc, 1, "Vector", FLOAT4ARRAYOID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 2, "Ids", INT4ARRAYOID, -1, 0);
     attinmeta = TupleDescGetAttInMetadata(outtertupdesc);
@@ -1647,7 +1652,7 @@ Datum grouping_pq(PG_FUNCTION_ARGS) {
     usrfctx->values[0] = (char*)palloc((18) * sizeof(char));
     usrfctx->values[1] = (char*)palloc((18 * vectorSize + 4) * sizeof(char));
     funcctx->user_fctx = (void*)usrfctx;
-    outtertupdesc = CreateTemplateTupleDesc(2);
+    outtertupdesc = CreateTemplateTupleDesc(2, false);
     TupleDescInitEntry(outtertupdesc, 1, "Ids", INT4OID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 2, "GroupIds", INT4OID, -1, 0);
     attinmeta = TupleDescGetAttInMetadata(outtertupdesc);
@@ -2110,11 +2115,11 @@ Datum add_online_retrofitting_statistics(PG_FUNCTION_ARGS) {
     jsmntok_t* t;
 
     int columnDataSize;
-    ColumnData* columnData;
+    ColumnData* columnData = NULL;
     int relationDataSize;
-    RelationData* relationData;
+    RelationDataObj* relationData = NULL;
     int relNumDataSize;
-    RelNumData* relNumData;
+    RelNumData* relNumData = NULL;
 
     const char* path = GET_STR(PG_GETARG_DATUM(0));
 
@@ -2152,10 +2157,65 @@ Datum add_online_retrofitting_statistics(PG_FUNCTION_ARGS) {
     PG_RETURN_INT32(0);
 }
 
+PG_FUNCTION_INFO_V1(infer_vector);
+
+Datum infer_vector(PG_FUNCTION_ARGS) {
+  int16 i_typlen;
+  bool i_typbyval;
+  char i_typalign;
+
+  int n = 0;       // dim of input vector
+
+  int dims[1];
+  int lbs[1];
+  Datum* dvalues;
+  ArrayType* v;
+
+  char* oTableName = palloc0(100);
+  struct hashmap* oVecs;
+  float* output_vector;
+
+  const char* term = GET_STR(PG_GETARG_DATUM(0));
+  int dim = PG_GETARG_INT32(1);
+
+  RadixTree* vecTree;
+
+  getTableName(ORIGINAL, oTableName, 100);
+  oVecs = getWordVecs(oTableName, NULL, false);
+
+  elog(INFO, "build radix tree ...");
+  vecTree = buildRadixTree(oVecs, dim);
+
+  output_vector = palloc(sizeof(float)*dim);
+  inferVec(output_vector, term, vecTree, "_", "simple", dim);
+
+  dvalues = (Datum*)palloc(sizeof(Datum) * n);
+
+  for (int i = 0; i < dim; i++) {
+    dvalues[i] =
+        Float4GetDatum(output_vector[i]);
+  }
+
+  dims[0] = dim;
+  lbs[0] = 1;
+  get_typlenbyvalalign(FLOAT4OID, &i_typlen, &i_typbyval, &i_typalign);
+  v = construct_md_array(dvalues, NULL, 1, dims, lbs, FLOAT4OID, i_typlen,
+                         i_typbyval, i_typalign);
+
+  PG_RETURN_ARRAYTYPE_P(v);
+}
+
 PG_FUNCTION_INFO_V1(run_retrofitting);
 
 Datum run_retrofitting(PG_FUNCTION_ARGS) {
-    elog(INFO, "started");
+
+    const bool DELETE_OLD_VECTORS = true;
+    const bool STORE_INTERMEDIATES = false;
+
+    clock_t start = clock();
+    clock_t end = 0;
+    clock_t start_subroutine = 0;
+    clock_t end_subroutine = 0;
 
     char* configJson;
     jsmntok_t* configTokens;
@@ -2176,10 +2236,26 @@ Datum run_retrofitting(PG_FUNCTION_ARGS) {
     ProcessedDeltaEntry* processedDelta;
 
     char* retroTableName = palloc0(100);
+    RadixTree* vecTree;
     struct hashmap* retroVecs;
+    struct hashmap* oldRetroVecs;
 
     char* oTableName = palloc0(100);
     struct hashmap* oVecs;
+
+    struct hashmap* deltaWords;
+
+    struct hashmap* allColMeans;
+    struct hashmap* max_r_map;
+    struct hashmap* max_c_map;
+    struct hashmap* size_map;
+    struct hashmap* value_map;
+    struct hashmap* cardinality_map;
+
+    struct hashmap* newVecs;
+
+    retroPointer* pointer;
+    float delta;
 
     int dim = 0;
 
@@ -2188,6 +2264,7 @@ Datum run_retrofitting(PG_FUNCTION_ARGS) {
     const char* resultTableName = GET_STR(PG_GETARG_DATUM(2));
 
     elog(INFO, "read config");
+    start_subroutine = clock();
     configTokens = readJsonFile(configPath, &configJson, &configTokenCount);
     if (configTokenCount < 0) {
         PG_RETURN_INT32(2);
@@ -2198,8 +2275,10 @@ Datum run_retrofitting(PG_FUNCTION_ARGS) {
         return 0;
     }
     retroConfig = getRetroConfig(configJson, configTokens, &retroConfigSize);
-
+    end_subroutine = clock();
+    elog(INFO, "TRACK retro_config_parsing_time %f", (double) (end_subroutine - start_subroutine) / CLOCKS_PER_SEC);
     elog(INFO, "read delta file");
+    start_subroutine = clock();
     deltaTokens = readJsonFile(deltaPath, &deltaJson, &deltaTokenCount);
     if (deltaTokenCount < 0) {
         PG_RETURN_INT32(2);
@@ -2214,59 +2293,125 @@ Datum run_retrofitting(PG_FUNCTION_ARGS) {
 
     processedDelta = processDelta(deltaCat, deltaCatCount, deltaRel, deltaRelCount, &processedDeltaCount);
     // TODO: free deltaCat and deltaRel
+    end_subroutine = clock();
+    elog(INFO, "TRACK delta_file_parsing_time %f", (double) (end_subroutine - start_subroutine) / CLOCKS_PER_SEC);
 
-    elog(INFO, "processed delta");
+    start_subroutine = clock();
+    deltaWords = determineChangedElements(deltaCat, deltaCatCount);
+    updateStatsBefore(deltaWords, deltaCat, deltaRel, deltaCatCount, deltaRelCount);
+    end_subroutine = clock();
+    elog(INFO, "TRACK statistics_update_before_time %f", (double) (end_subroutine - start_subroutine) / CLOCKS_PER_SEC);
 
+    start_subroutine = clock();
     getTableName(RETRO_VECS, retroTableName, 100);
-    retroVecs = getWordVecs(retroTableName, &dim);
+    retroVecs = getWordVecs(retroTableName, &dim, false);
+    end_subroutine = clock();
+    elog(INFO, "TRACK old_retro_vecs_retrieval_time %f", (double) (end_subroutine - start_subroutine) / CLOCKS_PER_SEC);
+    elog(INFO, "retrieved vectors ...");
+    start_subroutine = clock();
+    // WordVec* wv_debug = hashmap_get(retroVecs, &(WordVec) {.word="reviews.review#I_years_I_got_new_phone_I_need_Instagram_account_it_What_waste_"});
+    // elog(INFO, "test");
+    // if (wv_debug){
+    //   elog(INFO, "retro debug %f", ((float4*) wv_debug->vector)[0]); // ,((float4*)wv_debug->vector)[299]);
+    // }
 
-    for (int i = 0; i < processedDeltaCount; ++i) {
-        hashmap_delete(retroVecs, &(WordVec){.word=processedDelta[i].name});
+    if (DELETE_OLD_VECTORS){
+      for (int i = 0; i < processedDeltaCount; ++i) {
+          hashmap_delete(retroVecs, &(WordVec){.word=processedDelta[i].name});
+      }
     }
 
     hashmap_set_allocator(palloc, pfree);
 
     getTableName(ORIGINAL, oTableName, 100);
-    elog(INFO, "retrieving");
-    oVecs = getWordVecs(oTableName, NULL);
+    // elog(INFO, "retrieving");
+    oVecs = getWordVecs(oTableName, NULL, false);
     elog(INFO, "read original vecs");
-    RadixTree* vecTree = buildRadixTree(oVecs, dim);
+    vecTree = buildRadixTree(oVecs, dim);
     elog(INFO, "created radix tree");
 
     addMissingVecs(retroVecs, processedDelta, processedDeltaCount, vecTree, retroConfig->tokenization, dim);
-    elog(INFO, "FINISHED ADDING");
+    oldRetroVecs = backupOldRetroVecs(retroVecs, deltaCat, deltaCatCount, dim);
+    end_subroutine = clock();
+    elog(INFO, "TRACK create_basis_vector_time %f", (double) (end_subroutine - start_subroutine) / CLOCKS_PER_SEC);
+    start_subroutine = clock();
+    // wv_debug = hashmap_get(retroVecs, &(WordVec) {.word="reviews.review#I_years_I_got_new_phone_I_need_Instagram_account_it_What_waste_"});
+    // elog(INFO, "test");
+    // if (wv_debug){
+    //   elog(INFO, "retro debug %f", ((float4*) wv_debug->vector)[0]); // ,((float4*)wv_debug->vector)[299]);
+    // }
 
-    struct hashmap* max_r_map = hashmap_new(sizeof(dbElem), 0, 0, 0, dbElemHash, dbElemCompare, NULL);
-    struct hashmap* max_c_map = hashmap_new(sizeof(dbElem), 0, 0, 0, dbElemHash, dbElemCompare, NULL);
-    struct hashmap* size_map = hashmap_new(sizeof(dbElem), 0, 0, 0, dbElemHash, dbElemCompare, NULL);
-    struct hashmap* value_map = hashmap_new(sizeof(dbElem), 0, 0, 0, dbElemHash, dbElemCompare, NULL);
-    struct hashmap* cardinality_map = hashmap_new(sizeof(dbElem), 0, 0, 0, dbElemHash, dbElemCompare, NULL);
+    // variable for all col means: column name -> vector
+    allColMeans = loadAllColMeansFromDB(processedDelta, processedDeltaCount, dim);
 
-    retroPointer* pointer = palloc(sizeof(retroPointer));
+    max_r_map = hashmap_new(sizeof(dbElem), 0, 0, 0, dbElemHash, dbElemCompare, NULL);
+    max_c_map = hashmap_new(sizeof(dbElem), 0, 0, 0, dbElemHash, dbElemCompare, NULL);
+    size_map = hashmap_new(sizeof(dbElem), 0, 0, 0, dbElemHash, dbElemCompare, NULL);
+    value_map = hashmap_new(sizeof(dbElem), 0, 0, 0, dbElemHash, dbElemCompare, NULL);
+    cardinality_map = hashmap_new(sizeof(dbElem), 0, 0, 0, dbElemHash, dbElemCompare, NULL);
+
+    pointer = palloc(sizeof(retroPointer));
     pointer->max_r_map = max_r_map;
     pointer->max_c_map = max_c_map;
     pointer->size_map = size_map;
     pointer->value_map = value_map;
     pointer->cardinality_map = cardinality_map;
-
-    float delta = 0;
+    delta = 0;
     for (int i = 0; i < retroConfig->iterations; i++) {
+    // for (int i = 0; i < 1; i++) { // TODO change back
+        if (STORE_INTERMEDIATES) {
+          FILE *fp;
+          char* filename = palloc0(100);
+          sprintf(filename, "/tmp/intermediate_vectors_%d.txt", i);
+          remove(filename);
+          fp = fopen(filename, "w");
+          hashmap_scan(retroVecs, iterStoreVectors, fp);
+          fclose(fp);
+
+          chmod(filename, strtol("0777", 0, 8));
+          pfree(filename);
+        }
         elog(INFO, "RUN %d", i);
-        struct hashmap* newVecs = calcRetroVecs(processedDelta, processedDeltaCount, retroVecs, retroConfig, vecTree, pointer, dim);
+        newVecs = calcRetroVecs(processedDelta, processedDeltaCount, retroVecs, retroConfig, vecTree, pointer, allColMeans, dim);
+        // elog(INFO, "calc delta");
         delta = calcDelta(retroVecs, newVecs, dim);
         elog(INFO, "delta: %f", delta);
         updateRetroVecs(retroVecs, newVecs);
-        delta = calcDelta(retroVecs, newVecs, dim);
+        // delta = calcDelta(retroVecs, newVecs, dim);
         hashmap_free(newVecs);          // TODO: clear content of newVecs
-        elog(INFO, "delta: %f", delta);
+        // elog(INFO, "delta: %f", delta);
     }
+    if (STORE_INTERMEDIATES) {
+      char* filename = palloc0(100);
+      FILE *fp;
+      sprintf(filename, "/tmp/intermediate_vectors_%d.txt", retroConfig->iterations);
+      remove(filename);
+      fp = fopen(filename, "w");
+      hashmap_scan(retroVecs, iterStoreVectors, fp);
+      fclose(fp);
+      chmod(filename, strtol("0777", 0, 8));
+      pfree(filename);
+    }
+    end_subroutine = clock();
+    elog(INFO, "TRACK online_retrofitting_time %f", (double) (end_subroutine - start_subroutine) / CLOCKS_PER_SEC);
+    start_subroutine = clock();
+    updateStatsAfter(deltaWords, deltaCat, deltaRel, deltaCatCount, deltaRelCount, retroVecs, oldRetroVecs, allColMeans, dim);
+    // updateStats(deltaCat, deltaRel, deltaCatCount, deltaRelCount, retroVecs, oldRetroVecs, allColMeans, dim);
+    end_subroutine = clock();
+    elog(INFO, "TRACK update_statistics_time %f", (double) (end_subroutine - start_subroutine) / CLOCKS_PER_SEC);
+    start_subroutine = clock();
 
-    deleteRetroVecsDB(resultTableName);
-    retroVecsToDB(resultTableName, retroVecs, dim);
+    // deleteRetroVecsDB(resultTableName);
+    // retroVecsToDB(resultTableName, retroVecs, dim);
+    insertRetroVecsInDB(resultTableName, retroVecs, deltaCat, deltaCatCount, dim);
+    end_subroutine = clock();
+    elog(INFO, "TRACK insert_retro_vecs_time %f", (double) (end_subroutine - start_subroutine) / CLOCKS_PER_SEC);
 
     hashmap_free(retroVecs);
     hashmap_free(oVecs);
+    hashmap_free(oldRetroVecs);
 
-    elog(INFO, "finished");
+    end = clock();
+    elog(INFO, "finished time %f", (double) (end - start) / CLOCKS_PER_SEC);
     PG_RETURN_INT32(0);
 }

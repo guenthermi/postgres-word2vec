@@ -686,7 +686,7 @@ Datum ivpq_search_in(PG_FUNCTION_ARGS) {
     usrfctx = (UsrFctxBatch *)palloc(sizeof(UsrFctxBatch));
     fillUsrFctxBatch(usrfctx, queryIds, queryVectorsSize, topKs, k);
     funcctx->user_fctx = (void *)usrfctx;
-    outtertupdesc = CreateTemplateTupleDesc(3);
+    outtertupdesc = CreateTemplateTupleDesc(3, false);
 
     TupleDescInitEntry(outtertupdesc, 1, "QueryId", INT4OID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 2, "TargetId", INT4OID, -1, 0);
