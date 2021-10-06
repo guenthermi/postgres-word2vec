@@ -212,7 +212,7 @@ SELECT set_statistics_table('stat_google_vecs_norm_word')
 
 The current version of the extension is updated to work with PostgreSQL 12.
 An older version was implemented for version 10.
-For this version check out commit 705c1c62e83a32cba837a167ec7aabfbf7c097d9.
+For this version check out [commit 705c1c62e83a32cba837a167ec7aabfbf7c097d9](https://github.com/guenthermi/postgres-word2vec/tree/5e469aa59d0f322980ae37683d390b0457119300).
 If you run into problems by setting up the extension, you can create an issue in the repository.
 
 
