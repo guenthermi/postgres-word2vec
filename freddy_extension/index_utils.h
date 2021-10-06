@@ -228,42 +228,11 @@ void convert_int16_bytea(int16* input, bytea** output, int size);
 
 void convert_float4_bytea(float4* input, bytea** output, int size);
 
-static inline float computePQDistanceInt16(float* preDists, int16* codes,
-                                    int cbPositions, int cbCodes) {
-  float distance = 0;
-  for (int l = 0; l < cbPositions; l++) {
-    distance += preDists[cbCodes * l + codes[l]];
-  }
-  return distance;
-}
+float computePQDistanceInt16(float* preDists, int16* codes,
+                                    int cbPositions, int cbCodes);
 
-static inline void addToTargetList(TargetListElem* targetLists, int queryVectorsIndex,
+void addToTargetList(TargetListElem* targetLists, int queryVectorsIndex,
                             const int target_lists_size, const int method,
-                            int16* codes, float4* vector, int wordId) {
-  TargetListElem* currentTargetList = targetLists[queryVectorsIndex].last;
-  if (method != EXACT_CALC) {
-    currentTargetList->codes[currentTargetList->size] = codes;
-  }
-  currentTargetList->ids[currentTargetList->size] = wordId;
-  if ((method == PQ_PV_CALC) || (method == EXACT_CALC)) {
-    currentTargetList->vectors[currentTargetList->size] = vector;
-  }
-  currentTargetList->size += 1;
-  if (currentTargetList->size == target_lists_size) {
-    currentTargetList->next = palloc(sizeof(TargetListElem));
-    if (method != EXACT_CALC) {
-      currentTargetList->next->codes =
-          palloc(sizeof(int16*) * target_lists_size);
-    }
-    currentTargetList->next->ids = palloc(sizeof(int) * target_lists_size);
-    if ((method == PQ_PV_CALC) || (method == EXACT_CALC)) {
-      currentTargetList->next->vectors =
-          palloc(sizeof(float4*) * target_lists_size);
-    }
-    currentTargetList->next->size = 0;
-    currentTargetList->next->next = NULL;
-    targetLists[queryVectorsIndex].last = currentTargetList->next;
-  }
-}
+                            int16* codes, float4* vector, int wordId);
 
 #endif /*INDEX_UTILS_H*/

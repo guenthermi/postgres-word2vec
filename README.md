@@ -210,12 +210,10 @@ SELECT set_statistics_table('stat_google_vecs_norm_word')
 
 ## Troubleshooting
 
-The extension is developed for PostgreSQL 10.
-If you what to set it up on version 12, you have to do a few changes in `freddy_extension/ivpq_search_in.c` and `freddy_extension/freddy.c`:
-* The function `CreateTemplateTupleDesc` requires only one argument in newer versions.   The flag `hasoid` (second argument) is not required anymore and should be removed.
-* The function call context `funcctx` do not need a slot anymore. The statements `TupleTableSlot* slot`, `slot = TupleDescGetSlot(outtertupdesc)`, and `funcctx->slot = slot` can be removed.
-* Instead of `TupleGetDatum` the function `HeapTupleGetDatum` should be used, which only requires tuple as an argument.
-
+The current version of the extension is updated to work with PostgreSQL 12.
+An older version was implemented for version 10.
+For this version check out commit 705c1c62e83a32cba837a167ec7aabfbf7c097d9.
+If you run into problems by setting up the extension, you can create an issue in the repository.
 
 
 ## References

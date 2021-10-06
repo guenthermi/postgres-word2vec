@@ -28,7 +28,6 @@ PG_FUNCTION_INFO_V1(pq_search);
 Datum pq_search(PG_FUNCTION_ARGS) {
   FuncCallContext* funcctx;
   TupleDesc outtertupdesc;
-  TupleTableSlot* slot;
   AttInMetadata* attinmeta;
   UsrFctx* usrfctx;
 
@@ -140,11 +139,9 @@ Datum pq_search(PG_FUNCTION_ARGS) {
     usrfctx = (UsrFctx*)palloc(sizeof(UsrFctx));
     fillUsrFctx(usrfctx, topK, k);
     funcctx->user_fctx = (void*)usrfctx;
-    outtertupdesc = CreateTemplateTupleDesc(2, false);
+    outtertupdesc = CreateTemplateTupleDesc(2);
     TupleDescInitEntry(outtertupdesc, 1, "Id", INT4OID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 2, "Distance", FLOAT4OID, -1, 0);
-    slot = TupleDescGetSlot(outtertupdesc);
-    funcctx->slot = slot;
     attinmeta = TupleDescGetAttInMetadata(outtertupdesc);
     funcctx->attinmeta = attinmeta;
 
@@ -167,7 +164,7 @@ Datum pq_search(PG_FUNCTION_ARGS) {
     snprintf(usrfctx->values[1], 16, "%f", usrfctx->tk[usrfctx->iter].distance);
     usrfctx->iter++;
     outTuple = BuildTupleFromCStrings(funcctx->attinmeta, usrfctx->values);
-    result = TupleGetDatum(funcctx->slot, outTuple);
+    result = HeapTupleGetDatum(outTuple);
     SRF_RETURN_NEXT(funcctx, result);
   }
 }
@@ -177,7 +174,6 @@ PG_FUNCTION_INFO_V1(ivfadc_search);
 Datum ivfadc_search(PG_FUNCTION_ARGS) {
   FuncCallContext* funcctx;
   TupleDesc outtertupdesc;
-  TupleTableSlot* slot;
   AttInMetadata* attinmeta;
   UsrFctx* usrfctx;
 
@@ -384,11 +380,9 @@ Datum ivfadc_search(PG_FUNCTION_ARGS) {
     usrfctx = (UsrFctx*)palloc(sizeof(UsrFctx));
     fillUsrFctx(usrfctx, topK, k);
     funcctx->user_fctx = (void*)usrfctx;
-    outtertupdesc = CreateTemplateTupleDesc(2, false);
+    outtertupdesc = CreateTemplateTupleDesc(2);
     TupleDescInitEntry(outtertupdesc, 1, "Id", INT4OID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 2, "Distance", FLOAT4OID, -1, 0);
-    slot = TupleDescGetSlot(outtertupdesc);
-    funcctx->slot = slot;
     attinmeta = TupleDescGetAttInMetadata(outtertupdesc);
     funcctx->attinmeta = attinmeta;
 
@@ -410,7 +404,7 @@ Datum ivfadc_search(PG_FUNCTION_ARGS) {
     snprintf(usrfctx->values[1], 16, "%f", usrfctx->tk[usrfctx->iter].distance);
     usrfctx->iter++;
     outTuple = BuildTupleFromCStrings(funcctx->attinmeta, usrfctx->values);
-    result = TupleGetDatum(funcctx->slot, outTuple);
+    result = HeapTupleGetDatum(outTuple);
     SRF_RETURN_NEXT(funcctx, result);
   }
 }
@@ -423,7 +417,6 @@ Datum pq_search_in_batch(PG_FUNCTION_ARGS) {
 
   FuncCallContext* funcctx;
   TupleDesc outtertupdesc;
-  TupleTableSlot* slot;
   AttInMetadata* attinmeta;
   UsrFctxBatch* usrfctx;
 
@@ -647,13 +640,11 @@ Datum pq_search_in_batch(PG_FUNCTION_ARGS) {
     usrfctx = (UsrFctxBatch*)palloc(sizeof(UsrFctxBatch));
     fillUsrFctxBatch(usrfctx, queryIds, queryVectorsSize, topKs, k);
     funcctx->user_fctx = (void*)usrfctx;
-    outtertupdesc = CreateTemplateTupleDesc(3, false);
+    outtertupdesc = CreateTemplateTupleDesc(3);
 
     TupleDescInitEntry(outtertupdesc, 1, "QueryId", INT4OID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 2, "TargetId", INT4OID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 3, "Distance", FLOAT4OID, -1, 0);
-    slot = TupleDescGetSlot(outtertupdesc);
-    funcctx->slot = slot;
     attinmeta = TupleDescGetAttInMetadata(outtertupdesc);
     funcctx->attinmeta = attinmeta;
     end = clock();
@@ -678,7 +669,7 @@ Datum pq_search_in_batch(PG_FUNCTION_ARGS) {
                  .distance);
     usrfctx->iter++;
     outTuple = BuildTupleFromCStrings(funcctx->attinmeta, usrfctx->values);
-    result = TupleGetDatum(funcctx->slot, outTuple);
+    result = HeapTupleGetDatum(outTuple);
     SRF_RETURN_NEXT(funcctx, result);
   }
 }
@@ -688,7 +679,6 @@ PG_FUNCTION_INFO_V1(ivfadc_batch_search);
 Datum ivfadc_batch_search(PG_FUNCTION_ARGS) {
   FuncCallContext* funcctx;
   TupleDesc outtertupdesc;
-  TupleTableSlot* slot;
   AttInMetadata* attinmeta;
   UsrFctxBatch* usrfctx;
 
@@ -995,13 +985,11 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS) {
     usrfctx = (UsrFctxBatch*)palloc(sizeof(UsrFctxBatch));
     fillUsrFctxBatch(usrfctx, idArray, queryVectorsSize, topKs, k);
     funcctx->user_fctx = (void*)usrfctx;
-    outtertupdesc = CreateTemplateTupleDesc(3, false);
+    outtertupdesc = CreateTemplateTupleDesc(3);
 
     TupleDescInitEntry(outtertupdesc, 1, "QueryId", INT4OID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 2, "Id", INT4OID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 3, "Distance", FLOAT4OID, -1, 0);
-    slot = TupleDescGetSlot(outtertupdesc);
-    funcctx->slot = slot;
     attinmeta = TupleDescGetAttInMetadata(outtertupdesc);
     funcctx->attinmeta = attinmeta;
 
@@ -1030,7 +1018,7 @@ Datum ivfadc_batch_search(PG_FUNCTION_ARGS) {
                  .distance);
     usrfctx->iter++;
     outTuple = BuildTupleFromCStrings(funcctx->attinmeta, usrfctx->values);
-    result = TupleGetDatum(funcctx->slot, outTuple);
+    result = HeapTupleGetDatum(outTuple);
     SRF_RETURN_NEXT(funcctx, result);
   }
 }
@@ -1040,7 +1028,6 @@ PG_FUNCTION_INFO_V1(pq_search_in);
 Datum pq_search_in(PG_FUNCTION_ARGS) {
   FuncCallContext* funcctx;
   TupleDesc outtertupdesc;
-  TupleTableSlot* slot;
   AttInMetadata* attinmeta;
   UsrFctx* usrfctx;
 
@@ -1159,11 +1146,9 @@ Datum pq_search_in(PG_FUNCTION_ARGS) {
       usrfctx = (UsrFctx*)palloc(sizeof(UsrFctx));
       fillUsrFctx(usrfctx, topK, k);
       funcctx->user_fctx = (void*)usrfctx;
-      outtertupdesc = CreateTemplateTupleDesc(2, false);
+      outtertupdesc = CreateTemplateTupleDesc(2);
       TupleDescInitEntry(outtertupdesc, 1, "Id", INT4OID, -1, 0);
       TupleDescInitEntry(outtertupdesc, 2, "Distance", FLOAT4OID, -1, 0);
-      slot = TupleDescGetSlot(outtertupdesc);
-      funcctx->slot = slot;
       attinmeta = TupleDescGetAttInMetadata(outtertupdesc);
       funcctx->attinmeta = attinmeta;
 
@@ -1183,7 +1168,7 @@ Datum pq_search_in(PG_FUNCTION_ARGS) {
     snprintf(usrfctx->values[1], 16, "%f", usrfctx->tk[usrfctx->iter].distance);
     usrfctx->iter++;
     outTuple = BuildTupleFromCStrings(funcctx->attinmeta, usrfctx->values);
-    result = TupleGetDatum(funcctx->slot, outTuple);
+    result = HeapTupleGetDatum(outTuple);
     SRF_RETURN_NEXT(funcctx, result);
   }
 }
@@ -1193,7 +1178,6 @@ PG_FUNCTION_INFO_V1(grouping_pq);
 Datum grouping_pq(PG_FUNCTION_ARGS) {
   FuncCallContext* funcctx;
   TupleDesc outtertupdesc;
-  TupleTableSlot* slot;
   AttInMetadata* attinmeta;
   UsrFctxGrouping* usrfctx;
   int vectorSize = 300;
@@ -1387,11 +1371,9 @@ Datum grouping_pq(PG_FUNCTION_ARGS) {
     usrfctx->values[0] = (char*)palloc((18) * sizeof(char));
     usrfctx->values[1] = (char*)palloc((18 * vectorSize + 4) * sizeof(char));
     funcctx->user_fctx = (void*)usrfctx;
-    outtertupdesc = CreateTemplateTupleDesc(2, false);
+    outtertupdesc = CreateTemplateTupleDesc(2);
     TupleDescInitEntry(outtertupdesc, 1, "Ids", INT4OID, -1, 0);
     TupleDescInitEntry(outtertupdesc, 2, "GroupIds", INT4OID, -1, 0);
-    slot = TupleDescGetSlot(outtertupdesc);
-    funcctx->slot = slot;
     attinmeta = TupleDescGetAttInMetadata(outtertupdesc);
     funcctx->attinmeta = attinmeta;
 
@@ -1413,7 +1395,7 @@ Datum grouping_pq(PG_FUNCTION_ARGS) {
 
     usrfctx->iter++;
     outTuple = BuildTupleFromCStrings(funcctx->attinmeta, usrfctx->values);
-    result = TupleGetDatum(funcctx->slot, outTuple);
+    result = HeapTupleGetDatum(outTuple);
     SRF_RETURN_NEXT(funcctx, result);
   }
 }
